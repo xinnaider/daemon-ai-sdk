@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { beforeAll, describe, expect, it, vi } from "vitest";
 import { opencodeActions } from "../../src/adapters/providers/opencode/actions.js";
 import { codexActions } from "../../src/adapters/providers/codex/actions.js";
 import { claudeActions } from "../../src/adapters/providers/claude/actions.js";
@@ -1122,5 +1122,32 @@ describe("OpenCodeAdapter", () => {
     expect(client.session.permission.reply).toHaveBeenCalledWith(
       "session_1", "perm_1", { decision: "allow", scope: "once" }
     );
+  });
+});
+
+describe("SDK coverage documentation", () => {
+  let md: string;
+
+  beforeAll(async () => {
+    const { generateCoverageContent } = await import("../../scripts/generate-sdk-coverage.js");
+    md = generateCoverageContent();
+  }, 30000);
+
+  it("includes every opencode action ID in generated markdown", () => {
+    for (const action of opencodeActions) {
+      expect(md).toContain(action.id);
+    }
+  });
+
+  it("includes every codex action ID in generated markdown", () => {
+    for (const action of codexActions) {
+      expect(md).toContain(action.id);
+    }
+  });
+
+  it("includes every claude action ID in generated markdown", () => {
+    for (const action of claudeActions) {
+      expect(md).toContain(action.id);
+    }
   });
 });
