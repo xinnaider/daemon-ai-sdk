@@ -1,12 +1,14 @@
 <div align="center">
 
-# orbit-agent-daemon
+# daemon-ai-sdk
 
 **Multi-provider AI agent orchestration over HTTP & SSE**
 
 [![Node version](https://img.shields.io/badge/Node.js->=20-3c873a?style=flat-square)](https://nodejs.org)
 [![TypeScript](https://img.shields.io/badge/TypeScript-blue?style=flat-square&logo=typescript&logoColor=white)](https://www.typescriptlang.org)
 [![License](https://img.shields.io/badge/License-MIT-yellow?style=flat-square)](LICENSE)
+
+> Powered by [Orbit](https://github.com/xinnaider/orbit) — universal AI agent orchestration platform
 
 [Overview](#overview) • [Features](#features) • [Installation](#installation) • [Usage](#usage) • [API](#api) • [Architecture](#architecture) • [Development](#development)
 
