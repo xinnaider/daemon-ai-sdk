@@ -1,0 +1,51 @@
+import { actionDescriptor } from "../common/actionSchemas.js";
+
+const p = (id: string, sideEffects = false, streaming = false) =>
+  actionDescriptor(id, "opencode", "provider", sideEffects, streaming);
+const r = (id: string, sideEffects = false, streaming = false) =>
+  actionDescriptor(id, "opencode", "run", sideEffects, streaming);
+
+export const opencodeActions = [
+  p("global.health"),
+  p("app.log"),
+  p("app.agents"),
+  p("config.get"),
+  p("config.providers"),
+  p("path.get"),
+  p("project.list"),
+  p("project.current"),
+  p("auth.set"),
+  r("session.list"),
+  r("session.create"),
+  r("session.get"),
+  r("session.children"),
+  r("session.delete"),
+  r("session.update"),
+  r("session.init"),
+  r("session.share"),
+  r("session.unshare"),
+  r("session.summarize"),
+  r("session.messages"),
+  r("session.message"),
+  r("session.command", false, true),
+  r("session.shell", false, true),
+  r("session.revert"),
+  r("session.unrevert"),
+  r("session.prompt", false, true),
+  r("session.abort"),
+  r("session.permission.reply"),
+  r("find.text"),
+  r("find.files"),
+  r("find.symbols"),
+  r("file.read"),
+  r("file.status"),
+  r("tui.appendPrompt", true),
+  r("tui.openHelp", true),
+  r("tui.openSessions", true),
+  r("tui.openThemes", true),
+  r("tui.openModels", true),
+  r("tui.submitPrompt", true),
+  r("tui.clearPrompt", true),
+  r("tui.executeCommand", true),
+  r("tui.showToast", true),
+];
