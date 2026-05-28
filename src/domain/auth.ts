@@ -9,7 +9,7 @@ export interface ProviderAuthStatus {
   requiresApiKey: boolean;
 }
 
-const VALID_AUTH_MODES = new Set<string>(["auto", "cli", "sdk"]);
+const VALID_AUTH_MODES = new Set<AuthMode>(["auto", "cli", "sdk"]);
 
 export function resolveAuthMode(mode: AuthMode | undefined): AuthMode {
   if (mode === undefined) {

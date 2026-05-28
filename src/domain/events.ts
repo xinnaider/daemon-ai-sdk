@@ -13,6 +13,9 @@ export interface DaemonEvent {
 }
 
 export function createDaemonEvent(params: DaemonEvent): DaemonEvent {
+  if (!params.id || !params.runId) {
+    throw new Error("DaemonEvent requires id and runId");
+  }
   return { ...params };
 }
 
