@@ -156,6 +156,9 @@ type AgentRunRequest = {
 interface AgentProvider {
   id: ProviderId;
   getCapabilities(): Promise<ProviderCapabilities>;
+  listActions(): Promise<SdkActionDescriptor[]>;
+  executeProviderAction?(action: ProviderSdkActionRequest): Promise<SdkActionResult>;
+  executeRunAction?(action: RunSdkActionRequest): Promise<SdkActionResult>;
   startRun(input: ProviderRunInput, sink: ProviderEventSink): Promise<ProviderRunHandle>;
   resumeRun?(input: ProviderResumeInput, sink: ProviderEventSink): Promise<ProviderRunHandle>;
   cancelRun(handle: ProviderRunHandle): Promise<void>;
@@ -163,7 +166,7 @@ interface AgentProvider {
 }
 ```
 
-The provider adapter may expose extra SDK functions through typed capability-specific methods later, but the HTTP contract should remain stable.
+Provider adapters expose every supported SDK call through a strictly enumerated action registry. The HTTP contract stays stable while provider-specific SDK coverage grows.
 
 ### Event Logger Port
 
@@ -184,10 +187,14 @@ All core services receive a logger. No service writes directly to `console`.
 GET /health
 GET /providers
 GET /providers/:provider
+GET /providers/:provider/actions
+POST /providers/:provider/actions
 GET /logs
 ```
 
-`/providers` returns SDK availability, supported lifecycle operations, permission modes, known event types, supported options, and limitations.
+`/providers` returns SDK availability, supported lifecycle operations, permission modes, known event types, supported options, SDK action names, and limitations.
+
+`POST /providers/:provider/actions` executes provider-level SDK calls that are not tied to a live run. Examples: OpenCode `config.providers`, Codex `startThread`, Claude `listSessions`.
 
 ### Runs
 
@@ -203,9 +210,53 @@ GET /events
 POST /runs/:runId/cancel
 POST /runs/:runId/permissions/:permissionId
 POST /runs/:runId/resume
+POST /runs/:runId/actions
 ```
 
 Provider-specific endpoints are convenience wrappers around `POST /runs` with a fixed `provider`.
+
+`POST /runs/:runId/actions` executes SDK calls that require a live run or active query handle. Examples: Claude `Query.interrupt`, `Query.setModel`, `Query.mcpServerStatus`.
+
+### SDK Actions
+
+Provider adapters expose a strictly enumerated action registry. The daemon does not accept arbitrary method names. Each action describes:
+
+```ts
+type SdkActionDescriptor = {
+  id: string;
+  provider: ProviderId;
+  scope: "provider" | "run";
+  description: string;
+  inputSchema: Record<string, unknown>;
+  outputSchema: Record<string, unknown>;
+  streaming: boolean;
+  sideEffects: "none" | "memory" | "provider" | "filesystem" | "network";
+  permissionModeRequired?: PermissionMode;
+};
+```
+
+Action request:
+
+```json
+{
+  "action": "session.list",
+  "input": {}
+}
+```
+
+Action response:
+
+```json
+{
+  "provider": "opencode",
+  "action": "session.list",
+  "ok": true,
+  "result": [],
+  "raw": {}
+}
+```
+
+Action failures use the normal daemon error envelope and are also logged.
 
 ### SSE
 
@@ -750,6 +801,9 @@ Each implementation phase must update documentation before the phase is consider
 - TypeScript project compiles.
 - HTTP server starts and exposes `/health`.
 - `GET /providers` returns OpenCode, Codex, Claude capability metadata.
+- `GET /providers/:provider/actions` lists all daemon-supported SDK calls for that provider.
+- `POST /providers/:provider/actions` executes provider-level SDK calls from the enumerated action registry.
+- `POST /runs/:runId/actions` executes run-bound SDK calls from the enumerated action registry.
 - `POST /runs/:provider` creates a run with real SDK adapter wiring.
 - `GET /runs/:runId/events` streams SSE events.
 - `GET /events` streams all run events.
@@ -761,6 +815,7 @@ Each implementation phase must update documentation before the phase is consider
 - Codex permission and sandbox limitations are documented in capabilities.
 - `POST /runs/:runId/cancel` cancels or aborts active runs where supported.
 - Tests cover HTTP, SSE, event normalization, logging, permissions, and provider adapters.
+- Tests cover SDK action dispatch for every provider action registered by the adapters.
 - Docs explain how to run, configure SDK env vars, test HTTP, test SSE, understand adapters, and integrate Orbit later.
 
 ## Future Orbit Integration
