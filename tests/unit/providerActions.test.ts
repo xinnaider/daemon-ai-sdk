@@ -30,6 +30,8 @@ const claudeActionIds = [
 import { ProviderRegistry } from "../../src/adapters/providers/common/providerRegistry.js";
 import { DaemonError } from "../../src/domain/errors.js";
 import type { AgentProvider } from "../../src/ports/agentProvider.js";
+import type { SdkActionDescriptor } from "../../src/domain/providers.js";
+import type { AuthMode } from "../../src/domain/auth.js";
 
 describe("provider action descriptors", () => {
   it("registers every OpenCode SDK action", () => {
