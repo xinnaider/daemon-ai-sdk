@@ -42,6 +42,8 @@ export function normalizeCodexEvent(input: NormalizeInput): DaemonEvent[] {
       const item = raw.item as Record<string, unknown> | undefined;
       const itemType = (item?.type as string) ?? "";
 
+      const hasError = !!(raw.data as Record<string, unknown> | undefined)?.error;
+
       switch (itemType) {
         case "agent_message":
           return [
@@ -55,12 +57,18 @@ export function normalizeCodexEvent(input: NormalizeInput): DaemonEvent[] {
             evt(input, "reasoning.delta"),
             evt(input, "reasoning.completed"),
           ];
-        case "command_execution":
-          return [
+        case "command_execution": {
+          const events = [
             evt(input, "tool.started"),
             evt(input, "tool.delta"),
-            evt(input, "tool.completed"),
           ];
+          if (hasError) {
+            events.push(evt(input, "tool.failed"));
+          } else {
+            events.push(evt(input, "tool.completed"));
+          }
+          return events;
+        }
         case "file_change":
           return [evt(input, "file.changed")];
         case "mcp_tool_call":
