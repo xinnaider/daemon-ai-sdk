@@ -152,10 +152,13 @@ export class CodexAdapter implements AgentProvider {
 
   async startRun(request: AgentRunRequest): Promise<AgentRun> {
     const authMode = request.authMode ?? "auto";
-    const status = await this.getAuthStatus();
 
-    if (authMode === "cli" && !status.available) {
-      throw providerFailure("CLI auth required but codex CLI not found", "codex");
+    if (authMode === "auto" || authMode === "cli") {
+      const detect = this.options.detectCli ?? detectCli;
+      const cliStatus = await detect("codex");
+      if (authMode === "cli" && !cliStatus.available) {
+        throw providerFailure("CLI auth required but codex CLI not found", "codex");
+      }
     }
 
     const sdk = this.getSdkClient();

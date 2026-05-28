@@ -198,24 +198,30 @@ describe("CodexAdapter", () => {
     expect(status.source).toBe("cli");
   });
 
-  it("authMode: auto selects CLI/local auth before SDK/API-key auth", async () => {
-    const adapter = createAdapter({ detectCli: async () => ({ available: true, path: "/usr/local/bin/codex" }) });
-    const status = await adapter.getAuthStatus();
-    expect(status.available).toBe(true);
-    expect(status.source).toBe("cli");
-    expect(status.requiresApiKey).toBe(false);
+  it("authMode: auto tries CLI first, falls back to SDK on startRun", async () => {
+    const cli = vi.fn().mockResolvedValue({ available: true, path: "/usr/local/bin/codex" });
+    const sdkClient = createFakeSdkClient();
+    const factory: CodexSdkFactory = Object.assign(vi.fn().mockReturnValue(sdkClient), { _client: sdkClient });
+    const adapter = createAdapter({ sdkFactory: factory, detectCli: cli });
+    const request: AgentRunRequest = { id: "run_1", createdAt: "now", provider: "codex", prompt: "hi", authMode: "auto" };
+    await adapter.startRun(request);
+    expect(cli).toHaveBeenCalled();
   });
 
   it("authMode: cli fails with provider.auth_required when CLI auth unavailable", async () => {
     const adapter = createAdapter({ detectCli: async () => ({ available: false, path: null }) });
-    const status = await adapter.getAuthStatus();
-    expect(status.available).toBe(false);
+    const request: AgentRunRequest = { id: "run_1", createdAt: "now", provider: "codex", prompt: "hi", authMode: "cli" };
+    await expect(adapter.startRun(request)).rejects.toThrow(providerFailure("CLI auth required but codex CLI not found", "codex"));
   });
 
-  it("authMode: sdk uses explicit SDK/API-key environment credentials only", async () => {
-    const adapter = createAdapter({ detectCli: async () => ({ available: false, path: null }) });
-    const status = await adapter.getAuthStatus();
-    expect(status.requiresApiKey).toBe(true);
+  it("authMode: sdk skips CLI detection and uses SDK only on startRun", async () => {
+    const cli = vi.fn();
+    const sdkClient = createFakeSdkClient();
+    const factory: CodexSdkFactory = Object.assign(vi.fn().mockReturnValue(sdkClient), { _client: sdkClient });
+    const adapter = createAdapter({ sdkFactory: factory, detectCli: cli });
+    const request: AgentRunRequest = { id: "run_1", createdAt: "now", provider: "codex", prompt: "hi", authMode: "sdk" };
+    await adapter.startRun(request);
+    expect(cli).not.toHaveBeenCalled();
   });
 
   it("startRun() creates an AgentRun with correct defaults", async () => {
