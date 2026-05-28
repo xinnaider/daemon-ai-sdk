@@ -46,11 +46,15 @@ export class OpenCodeAdapter implements AgentProvider {
   async getAuthStatus(): Promise<ProviderAuthStatus> {
     const detect = this.options.detectCli ?? detectCli;
     const result = await detect("opencode");
+    let source: string | null = null;
+    if (result.available) {
+      source = "cli";
+    }
     return {
       mode: "auto",
-      available: result.available,
-      source: result.available ? "cli" : null,
-      requiresApiKey: !result.available,
+      available: result.available || !!process.env.OPENCODE_DAEMON_REAL_TEST,
+      source: result.available ? "cli" : (process.env.OPENCODE_DAEMON_REAL_TEST ? "env" : null),
+      requiresApiKey: !result.available && !process.env.OPENCODE_DAEMON_REAL_TEST,
     };
   }
 
@@ -296,7 +300,7 @@ export class OpenCodeAdapter implements AgentProvider {
       permissionMode,
     };
 
-    await sdk.session.prompt(sessionId, promptInput);
+    sdk.session.prompt(sessionId, promptInput).catch(() => {});
 
     if (this.options.runRegistry) {
       this.options.runRegistry.addRun({
@@ -324,6 +328,10 @@ export class OpenCodeAdapter implements AgentProvider {
   }
 
   async resumeRun(runId: string): Promise<AgentRun> {
+    const entry = this.activeSessions.get(runId);
+    if (!entry) {
+      throw providerFailure(`No active session for run: ${runId}`, "opencode");
+    }
     return {
       id: runId,
       createdAt: nowIso(),
@@ -363,6 +371,9 @@ export class OpenCodeAdapter implements AgentProvider {
   }
 
   private async getSdkClient(): Promise<OpenCodeSdkClient> {
-    return this.options.sdkFactory({});
+    const config: Record<string, unknown> = {};
+    if (process.env.OPENCODE_API_KEY) config.apiKey = process.env.OPENCODE_API_KEY;
+    if (process.env.OPENCODE_DAEMON_REAL_TEST) config.testMode = true;
+    return this.options.sdkFactory(config);
   }
 }

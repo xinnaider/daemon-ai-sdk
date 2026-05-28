@@ -1102,7 +1102,11 @@ describe("OpenCodeAdapter", () => {
   });
 
   it("resumeRun() returns a resumed run with running status", async () => {
-    const adapter = createOpenCodeAdapter();
+    const client = createFakeOpenCodeSdkClient();
+    const factory: OpenCodeSdkFactory & { _client: OpenCodeSdkClient } = Object.assign(vi.fn().mockResolvedValue(client), { _client: client });
+    const adapter = createOpenCodeAdapter({ sdkFactory: factory });
+    const request: AgentRunRequest = { id: "run_1", createdAt: "now", provider: "opencode", prompt: "hello" };
+    await adapter.startRun(request);
     const run = await adapter.resumeRun("run_1");
     expect(run.id).toBe("run_1");
     expect(run.status).toBe("running");
