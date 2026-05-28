@@ -71,6 +71,38 @@ function makeMockDeps() {
   return { mockProvider, providers, runs, permissions, events, logger, execution };
 }
 
+describe("Daemon Composition Root", () => {
+  it("buildDaemon returns wired runtime with three providers", async () => {
+    const { buildDaemon } = await import("../../src/main.js");
+    const runtime = buildDaemon();
+
+    expect(runtime.server).toBeDefined();
+    expect(runtime.providers).toBeDefined();
+    expect(runtime.runs).toBeDefined();
+    expect(runtime.logger).toBeDefined();
+    expect(runtime.events).toBeDefined();
+    expect(runtime.execution).toBeDefined();
+
+    const providerIds = runtime.providers.list();
+    expect(providerIds).toContain("opencode");
+    expect(providerIds).toContain("claude");
+    expect(providerIds).toContain("codex");
+    expect(providerIds.length).toBe(3);
+
+    await runtime.server.close();
+  });
+
+  it("buildDaemon with overrides merges correctly", async () => {
+    const { buildDaemon } = await import("../../src/main.js");
+
+    const customConfig = { port: 9999, host: "0.0.0.0", logLevel: "debug" };
+    const runtime = buildDaemon({ config: customConfig });
+
+    expect(runtime.server).toBeDefined();
+    await runtime.server.close();
+  });
+});
+
 describe("Server Lifecycle", () => {
   it("creates a server with health endpoint", async () => {
     const deps = makeMockDeps();
