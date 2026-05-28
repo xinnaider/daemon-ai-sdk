@@ -563,3 +563,560 @@ describe("ClaudeAdapter", () => {
     await expect(adapter.resolvePermission("run_1", "perm_1", { decision: "allow", scope: "once" })).resolves.not.toThrow();
   });
 });
+
+import { OpenCodeAdapter } from "../../src/adapters/providers/opencode/opencodeAdapter.js";
+import type { OpenCodeSdkFactory, OpenCodeSdkClient } from "../../src/adapters/providers/opencode/opencodeClient.js";
+import type { ProviderEventSink } from "../../src/domain/events.js";
+import { EventBus } from "../../src/application/eventBus.js";
+import { providerFailure } from "../../src/domain/errors.js";
+
+function createFakeOpenCodeSdkClient(): OpenCodeSdkClient {
+  const unsubscribe = vi.fn();
+  return {
+    global: { health: vi.fn().mockResolvedValue({ status: "ok" }) },
+    app: { log: vi.fn().mockResolvedValue(undefined), agents: vi.fn().mockResolvedValue([]) },
+    config: { get: vi.fn().mockResolvedValue({}), providers: vi.fn().mockResolvedValue([]) },
+    path: { get: vi.fn().mockResolvedValue({ path: "/workspace" }) },
+    project: { list: vi.fn().mockResolvedValue([]), current: vi.fn().mockResolvedValue({}) },
+    auth: { set: vi.fn().mockResolvedValue({}) },
+    session: {
+      list: vi.fn().mockResolvedValue([]),
+      create: vi.fn().mockResolvedValue({ id: "session_1" }),
+      get: vi.fn().mockResolvedValue({ id: "session_1" }),
+      children: vi.fn().mockResolvedValue([]),
+      delete: vi.fn().mockResolvedValue(undefined),
+      update: vi.fn().mockResolvedValue({}),
+      init: vi.fn().mockResolvedValue({}),
+      share: vi.fn().mockResolvedValue(undefined),
+      unshare: vi.fn().mockResolvedValue(undefined),
+      summarize: vi.fn().mockResolvedValue("summary"),
+      messages: vi.fn().mockResolvedValue([]),
+      message: vi.fn().mockResolvedValue({}),
+      command: vi.fn().mockResolvedValue({ output: "cmd output" }),
+      shell: vi.fn().mockResolvedValue({ output: "shell output" }),
+      revert: vi.fn().mockResolvedValue(undefined),
+      unrevert: vi.fn().mockResolvedValue(undefined),
+      prompt: vi.fn().mockResolvedValue({}),
+      abort: vi.fn().mockResolvedValue(undefined),
+      permission: { reply: vi.fn().mockResolvedValue(undefined) },
+    },
+    find: {
+      text: vi.fn().mockResolvedValue({ results: [] }),
+      files: vi.fn().mockResolvedValue({ results: [] }),
+      symbols: vi.fn().mockResolvedValue({ results: [] }),
+    },
+    file: {
+      read: vi.fn().mockResolvedValue({ content: "" }),
+      status: vi.fn().mockResolvedValue({ status: "unmodified" }),
+    },
+    tui: {
+      appendPrompt: vi.fn().mockResolvedValue(undefined),
+      openHelp: vi.fn().mockResolvedValue(undefined),
+      openSessions: vi.fn().mockResolvedValue(undefined),
+      openThemes: vi.fn().mockResolvedValue(undefined),
+      openModels: vi.fn().mockResolvedValue(undefined),
+      submitPrompt: vi.fn().mockResolvedValue(undefined),
+      clearPrompt: vi.fn().mockResolvedValue(undefined),
+      executeCommand: vi.fn().mockResolvedValue(undefined),
+      showToast: vi.fn().mockResolvedValue(undefined),
+    },
+    event: { subscribe: vi.fn().mockResolvedValue(unsubscribe) },
+    _unsubscribe: unsubscribe,
+  };
+}
+
+function createFakeOpenCodeSdkFactory(): OpenCodeSdkFactory & { _client: OpenCodeSdkClient } {
+  const client = createFakeOpenCodeSdkClient();
+  const factory = vi.fn().mockResolvedValue(client);
+  return Object.assign(factory, { _client: client });
+}
+
+function createOpenCodeFakeSink(): ProviderEventSink {
+  return { emit: vi.fn().mockResolvedValue(undefined) };
+}
+
+function createOpenCodeAdapter(options: Partial<ConstructorParameters<typeof OpenCodeAdapter>[0]> = {}): OpenCodeAdapter {
+  const sdkFactory = createFakeOpenCodeSdkFactory();
+  return new OpenCodeAdapter({
+    sdkFactory,
+    eventBus: undefined as any,
+    runRegistry: undefined as any,
+    permissionService: undefined as any,
+    detectCli: async () => ({ available: true, path: "/usr/local/bin/opencode" }),
+    ...options,
+  });
+}
+
+describe("OpenCodeAdapter", () => {
+  it("getCapabilities() includes every OpenCode action ID", () => {
+    const adapter = createOpenCodeAdapter();
+    const caps = adapter.getCapabilities();
+    expect(caps).toBeDefined();
+    expect(caps.maxConcurrency).toBeGreaterThan(0);
+    const actionIds = adapter.listActions().map((a) => a.id);
+    expect(actionIds).toEqual(opencodeActions.map((a) => a.id));
+  });
+
+  it("global.health calls SDK global.health", async () => {
+    const client = createFakeOpenCodeSdkClient();
+    const factory: OpenCodeSdkFactory & { _client: OpenCodeSdkClient } = Object.assign(vi.fn().mockResolvedValue(client), { _client: client });
+    const adapter = createOpenCodeAdapter({ sdkFactory: factory });
+    const result = await adapter.executeProviderAction({ actionId: "global.health", input: {} });
+    expect(client.global.health).toHaveBeenCalled();
+    expect(result.actionId).toBe("global.health");
+  });
+
+  it("app.log calls SDK app.log", async () => {
+    const client = createFakeOpenCodeSdkClient();
+    const factory: OpenCodeSdkFactory & { _client: OpenCodeSdkClient } = Object.assign(vi.fn().mockResolvedValue(client), { _client: client });
+    const adapter = createOpenCodeAdapter({ sdkFactory: factory });
+    const result = await adapter.executeProviderAction({ actionId: "app.log", input: { level: "info", message: "test" } });
+    expect(client.app.log).toHaveBeenCalledWith({ level: "info", message: "test" });
+    expect(result.actionId).toBe("app.log");
+  });
+
+  it("app.agents calls SDK app.agents", async () => {
+    const client = createFakeOpenCodeSdkClient();
+    const factory: OpenCodeSdkFactory & { _client: OpenCodeSdkClient } = Object.assign(vi.fn().mockResolvedValue(client), { _client: client });
+    const adapter = createOpenCodeAdapter({ sdkFactory: factory });
+    const result = await adapter.executeProviderAction({ actionId: "app.agents", input: {} });
+    expect(client.app.agents).toHaveBeenCalled();
+    expect(result.actionId).toBe("app.agents");
+  });
+
+  it("config.get calls SDK config.get", async () => {
+    const client = createFakeOpenCodeSdkClient();
+    const factory: OpenCodeSdkFactory & { _client: OpenCodeSdkClient } = Object.assign(vi.fn().mockResolvedValue(client), { _client: client });
+    const adapter = createOpenCodeAdapter({ sdkFactory: factory });
+    const result = await adapter.executeProviderAction({ actionId: "config.get", input: {} });
+    expect(client.config.get).toHaveBeenCalled();
+    expect(result.actionId).toBe("config.get");
+  });
+
+  it("config.providers calls SDK config.providers", async () => {
+    const client = createFakeOpenCodeSdkClient();
+    const factory: OpenCodeSdkFactory & { _client: OpenCodeSdkClient } = Object.assign(vi.fn().mockResolvedValue(client), { _client: client });
+    const adapter = createOpenCodeAdapter({ sdkFactory: factory });
+    const result = await adapter.executeProviderAction({ actionId: "config.providers", input: {} });
+    expect(client.config.providers).toHaveBeenCalled();
+    expect(result.actionId).toBe("config.providers");
+  });
+
+  it("path.get calls SDK path.get", async () => {
+    const client = createFakeOpenCodeSdkClient();
+    const factory: OpenCodeSdkFactory & { _client: OpenCodeSdkClient } = Object.assign(vi.fn().mockResolvedValue(client), { _client: client });
+    const adapter = createOpenCodeAdapter({ sdkFactory: factory });
+    const result = await adapter.executeProviderAction({ actionId: "path.get", input: {} });
+    expect(client.path.get).toHaveBeenCalled();
+    expect(result.actionId).toBe("path.get");
+  });
+
+  it("project.list calls SDK project.list", async () => {
+    const client = createFakeOpenCodeSdkClient();
+    const factory: OpenCodeSdkFactory & { _client: OpenCodeSdkClient } = Object.assign(vi.fn().mockResolvedValue(client), { _client: client });
+    const adapter = createOpenCodeAdapter({ sdkFactory: factory });
+    const result = await adapter.executeProviderAction({ actionId: "project.list", input: {} });
+    expect(client.project.list).toHaveBeenCalled();
+    expect(result.actionId).toBe("project.list");
+  });
+
+  it("project.current calls SDK project.current", async () => {
+    const client = createFakeOpenCodeSdkClient();
+    const factory: OpenCodeSdkFactory & { _client: OpenCodeSdkClient } = Object.assign(vi.fn().mockResolvedValue(client), { _client: client });
+    const adapter = createOpenCodeAdapter({ sdkFactory: factory });
+    const result = await adapter.executeProviderAction({ actionId: "project.current", input: {} });
+    expect(client.project.current).toHaveBeenCalled();
+    expect(result.actionId).toBe("project.current");
+  });
+
+  it("auth.set calls SDK auth.set", async () => {
+    const client = createFakeOpenCodeSdkClient();
+    const factory: OpenCodeSdkFactory & { _client: OpenCodeSdkClient } = Object.assign(vi.fn().mockResolvedValue(client), { _client: client });
+    const adapter = createOpenCodeAdapter({ sdkFactory: factory });
+    const result = await adapter.executeProviderAction({ actionId: "auth.set", input: { provider: "openai", apiKey: "sk-..." } });
+    expect(client.auth.set).toHaveBeenCalledWith({ provider: "openai", apiKey: "sk-..." });
+    expect(result.actionId).toBe("auth.set");
+  });
+
+  it("session.list calls SDK session.list", async () => {
+    const client = createFakeOpenCodeSdkClient();
+    const factory: OpenCodeSdkFactory & { _client: OpenCodeSdkClient } = Object.assign(vi.fn().mockResolvedValue(client), { _client: client });
+    const adapter = createOpenCodeAdapter({ sdkFactory: factory });
+    const result = await adapter.executeRunAction({ runId: "run_1", actionId: "session.list", input: {} });
+    expect(client.session.list).toHaveBeenCalled();
+    expect(result.actionId).toBe("session.list");
+  });
+
+  it("session.create calls SDK session.create", async () => {
+    const client = createFakeOpenCodeSdkClient();
+    const factory: OpenCodeSdkFactory & { _client: OpenCodeSdkClient } = Object.assign(vi.fn().mockResolvedValue(client), { _client: client });
+    const adapter = createOpenCodeAdapter({ sdkFactory: factory });
+    const result = await adapter.executeRunAction({ runId: "run_1", actionId: "session.create", input: { label: "test" } });
+    expect(client.session.create).toHaveBeenCalledWith({ label: "test" });
+    expect(result.actionId).toBe("session.create");
+  });
+
+  it("session.get calls SDK session.get", async () => {
+    const client = createFakeOpenCodeSdkClient();
+    const factory: OpenCodeSdkFactory & { _client: OpenCodeSdkClient } = Object.assign(vi.fn().mockResolvedValue(client), { _client: client });
+    const adapter = createOpenCodeAdapter({ sdkFactory: factory });
+    const result = await adapter.executeRunAction({ runId: "run_1", actionId: "session.get", input: { id: "session_1" } });
+    expect(client.session.get).toHaveBeenCalledWith("session_1");
+    expect(result.actionId).toBe("session.get");
+  });
+
+  it("session.children calls SDK session.children", async () => {
+    const client = createFakeOpenCodeSdkClient();
+    const factory: OpenCodeSdkFactory & { _client: OpenCodeSdkClient } = Object.assign(vi.fn().mockResolvedValue(client), { _client: client });
+    const adapter = createOpenCodeAdapter({ sdkFactory: factory });
+    const result = await adapter.executeRunAction({ runId: "run_1", actionId: "session.children", input: { id: "session_1" } });
+    expect(client.session.children).toHaveBeenCalledWith("session_1");
+    expect(result.actionId).toBe("session.children");
+  });
+
+  it("session.delete calls SDK session.delete", async () => {
+    const client = createFakeOpenCodeSdkClient();
+    const factory: OpenCodeSdkFactory & { _client: OpenCodeSdkClient } = Object.assign(vi.fn().mockResolvedValue(client), { _client: client });
+    const adapter = createOpenCodeAdapter({ sdkFactory: factory });
+    const result = await adapter.executeRunAction({ runId: "run_1", actionId: "session.delete", input: { id: "session_1" } });
+    expect(client.session.delete).toHaveBeenCalledWith("session_1");
+    expect(result.actionId).toBe("session.delete");
+  });
+
+  it("session.update calls SDK session.update", async () => {
+    const client = createFakeOpenCodeSdkClient();
+    const factory: OpenCodeSdkFactory & { _client: OpenCodeSdkClient } = Object.assign(vi.fn().mockResolvedValue(client), { _client: client });
+    const adapter = createOpenCodeAdapter({ sdkFactory: factory });
+    const result = await adapter.executeRunAction({ runId: "run_1", actionId: "session.update", input: { id: "session_1", label: "updated" } });
+    expect(client.session.update).toHaveBeenCalledWith("session_1", { id: "session_1", label: "updated" });
+    expect(result.actionId).toBe("session.update");
+  });
+
+  it("session.init calls SDK session.init", async () => {
+    const client = createFakeOpenCodeSdkClient();
+    const factory: OpenCodeSdkFactory & { _client: OpenCodeSdkClient } = Object.assign(vi.fn().mockResolvedValue(client), { _client: client });
+    const adapter = createOpenCodeAdapter({ sdkFactory: factory });
+    const result = await adapter.executeRunAction({ runId: "run_1", actionId: "session.init", input: { model: "gpt-4" } });
+    expect(client.session.init).toHaveBeenCalledWith({ model: "gpt-4" });
+    expect(result.actionId).toBe("session.init");
+  });
+
+  it("session.share calls SDK session.share", async () => {
+    const client = createFakeOpenCodeSdkClient();
+    const factory: OpenCodeSdkFactory & { _client: OpenCodeSdkClient } = Object.assign(vi.fn().mockResolvedValue(client), { _client: client });
+    const adapter = createOpenCodeAdapter({ sdkFactory: factory });
+    const result = await adapter.executeRunAction({ runId: "run_1", actionId: "session.share", input: { id: "session_1" } });
+    expect(client.session.share).toHaveBeenCalledWith("session_1");
+    expect(result.actionId).toBe("session.share");
+  });
+
+  it("session.unshare calls SDK session.unshare", async () => {
+    const client = createFakeOpenCodeSdkClient();
+    const factory: OpenCodeSdkFactory & { _client: OpenCodeSdkClient } = Object.assign(vi.fn().mockResolvedValue(client), { _client: client });
+    const adapter = createOpenCodeAdapter({ sdkFactory: factory });
+    const result = await adapter.executeRunAction({ runId: "run_1", actionId: "session.unshare", input: { id: "session_1" } });
+    expect(client.session.unshare).toHaveBeenCalledWith("session_1");
+    expect(result.actionId).toBe("session.unshare");
+  });
+
+  it("session.summarize calls SDK session.summarize", async () => {
+    const client = createFakeOpenCodeSdkClient();
+    const factory: OpenCodeSdkFactory & { _client: OpenCodeSdkClient } = Object.assign(vi.fn().mockResolvedValue(client), { _client: client });
+    const adapter = createOpenCodeAdapter({ sdkFactory: factory });
+    const result = await adapter.executeRunAction({ runId: "run_1", actionId: "session.summarize", input: { id: "session_1" } });
+    expect(client.session.summarize).toHaveBeenCalledWith("session_1");
+    expect(result.actionId).toBe("session.summarize");
+  });
+
+  it("session.messages calls SDK session.messages", async () => {
+    const client = createFakeOpenCodeSdkClient();
+    const factory: OpenCodeSdkFactory & { _client: OpenCodeSdkClient } = Object.assign(vi.fn().mockResolvedValue(client), { _client: client });
+    const adapter = createOpenCodeAdapter({ sdkFactory: factory });
+    const result = await adapter.executeRunAction({ runId: "run_1", actionId: "session.messages", input: { id: "session_1" } });
+    expect(client.session.messages).toHaveBeenCalledWith("session_1");
+    expect(result.actionId).toBe("session.messages");
+  });
+
+  it("session.message calls SDK session.message", async () => {
+    const client = createFakeOpenCodeSdkClient();
+    const factory: OpenCodeSdkFactory & { _client: OpenCodeSdkClient } = Object.assign(vi.fn().mockResolvedValue(client), { _client: client });
+    const adapter = createOpenCodeAdapter({ sdkFactory: factory });
+    const result = await adapter.executeRunAction({ runId: "run_1", actionId: "session.message", input: { id: "session_1", msgId: "msg_1" } });
+    expect(client.session.message).toHaveBeenCalledWith("session_1", "msg_1");
+    expect(result.actionId).toBe("session.message");
+  });
+
+  it("session.command calls SDK session.command", async () => {
+    const client = createFakeOpenCodeSdkClient();
+    const factory: OpenCodeSdkFactory & { _client: OpenCodeSdkClient } = Object.assign(vi.fn().mockResolvedValue(client), { _client: client });
+    const adapter = createOpenCodeAdapter({ sdkFactory: factory });
+    const result = await adapter.executeRunAction({ runId: "run_1", actionId: "session.command", input: { id: "session_1", command: "ls" } });
+    expect(client.session.command).toHaveBeenCalledWith("session_1", { id: "session_1", command: "ls" });
+    expect(result.actionId).toBe("session.command");
+  });
+
+  it("session.shell calls SDK session.shell", async () => {
+    const client = createFakeOpenCodeSdkClient();
+    const factory: OpenCodeSdkFactory & { _client: OpenCodeSdkClient } = Object.assign(vi.fn().mockResolvedValue(client), { _client: client });
+    const adapter = createOpenCodeAdapter({ sdkFactory: factory });
+    const result = await adapter.executeRunAction({ runId: "run_1", actionId: "session.shell", input: { id: "session_1", cmd: "ls" } });
+    expect(client.session.shell).toHaveBeenCalledWith("session_1", { id: "session_1", cmd: "ls" });
+    expect(result.actionId).toBe("session.shell");
+  });
+
+  it("session.revert calls SDK session.revert", async () => {
+    const client = createFakeOpenCodeSdkClient();
+    const factory: OpenCodeSdkFactory & { _client: OpenCodeSdkClient } = Object.assign(vi.fn().mockResolvedValue(client), { _client: client });
+    const adapter = createOpenCodeAdapter({ sdkFactory: factory });
+    const result = await adapter.executeRunAction({ runId: "run_1", actionId: "session.revert", input: { id: "session_1" } });
+    expect(client.session.revert).toHaveBeenCalledWith("session_1");
+    expect(result.actionId).toBe("session.revert");
+  });
+
+  it("session.unrevert calls SDK session.unrevert", async () => {
+    const client = createFakeOpenCodeSdkClient();
+    const factory: OpenCodeSdkFactory & { _client: OpenCodeSdkClient } = Object.assign(vi.fn().mockResolvedValue(client), { _client: client });
+    const adapter = createOpenCodeAdapter({ sdkFactory: factory });
+    const result = await adapter.executeRunAction({ runId: "run_1", actionId: "session.unrevert", input: { id: "session_1" } });
+    expect(client.session.unrevert).toHaveBeenCalledWith("session_1");
+    expect(result.actionId).toBe("session.unrevert");
+  });
+
+  it("session.prompt calls SDK session.prompt", async () => {
+    const client = createFakeOpenCodeSdkClient();
+    const factory: OpenCodeSdkFactory & { _client: OpenCodeSdkClient } = Object.assign(vi.fn().mockResolvedValue(client), { _client: client });
+    const adapter = createOpenCodeAdapter({ sdkFactory: factory });
+    const result = await adapter.executeRunAction({ runId: "run_1", actionId: "session.prompt", input: { id: "session_1", prompt: "hello" } });
+    expect(client.session.prompt).toHaveBeenCalledWith("session_1", { id: "session_1", prompt: "hello" });
+    expect(result.actionId).toBe("session.prompt");
+  });
+
+  it("session.abort calls SDK session.abort", async () => {
+    const client = createFakeOpenCodeSdkClient();
+    const factory: OpenCodeSdkFactory & { _client: OpenCodeSdkClient } = Object.assign(vi.fn().mockResolvedValue(client), { _client: client });
+    const adapter = createOpenCodeAdapter({ sdkFactory: factory });
+    const result = await adapter.executeRunAction({ runId: "run_1", actionId: "session.abort", input: { id: "session_1" } });
+    expect(client.session.abort).toHaveBeenCalledWith("session_1");
+    expect(result.actionId).toBe("session.abort");
+  });
+
+  it("session.permission.reply calls SDK session.permission.reply", async () => {
+    const client = createFakeOpenCodeSdkClient();
+    const factory: OpenCodeSdkFactory & { _client: OpenCodeSdkClient } = Object.assign(vi.fn().mockResolvedValue(client), { _client: client });
+    const adapter = createOpenCodeAdapter({ sdkFactory: factory });
+    const result = await adapter.executeRunAction({ runId: "run_1", actionId: "session.permission.reply", input: { id: "session_1", permissionId: "perm_1", decision: "allow" } });
+    expect(client.session.permission.reply).toHaveBeenCalledWith("session_1", "perm_1", { id: "session_1", permissionId: "perm_1", decision: "allow" });
+    expect(result.actionId).toBe("session.permission.reply");
+  });
+
+  it("find.text calls SDK find.text", async () => {
+    const client = createFakeOpenCodeSdkClient();
+    const factory: OpenCodeSdkFactory & { _client: OpenCodeSdkClient } = Object.assign(vi.fn().mockResolvedValue(client), { _client: client });
+    const adapter = createOpenCodeAdapter({ sdkFactory: factory });
+    const result = await adapter.executeRunAction({ runId: "run_1", actionId: "find.text", input: { pattern: "hello" } });
+    expect(client.find.text).toHaveBeenCalledWith({ pattern: "hello" });
+    expect(result.actionId).toBe("find.text");
+  });
+
+  it("find.files calls SDK find.files", async () => {
+    const client = createFakeOpenCodeSdkClient();
+    const factory: OpenCodeSdkFactory & { _client: OpenCodeSdkClient } = Object.assign(vi.fn().mockResolvedValue(client), { _client: client });
+    const adapter = createOpenCodeAdapter({ sdkFactory: factory });
+    const result = await adapter.executeRunAction({ runId: "run_1", actionId: "find.files", input: { pattern: "*.ts" } });
+    expect(client.find.files).toHaveBeenCalledWith({ pattern: "*.ts" });
+    expect(result.actionId).toBe("find.files");
+  });
+
+  it("find.symbols calls SDK find.symbols", async () => {
+    const client = createFakeOpenCodeSdkClient();
+    const factory: OpenCodeSdkFactory & { _client: OpenCodeSdkClient } = Object.assign(vi.fn().mockResolvedValue(client), { _client: client });
+    const adapter = createOpenCodeAdapter({ sdkFactory: factory });
+    const result = await adapter.executeRunAction({ runId: "run_1", actionId: "find.symbols", input: { query: "foo" } });
+    expect(client.find.symbols).toHaveBeenCalledWith({ query: "foo" });
+    expect(result.actionId).toBe("find.symbols");
+  });
+
+  it("file.read calls SDK file.read", async () => {
+    const client = createFakeOpenCodeSdkClient();
+    const factory: OpenCodeSdkFactory & { _client: OpenCodeSdkClient } = Object.assign(vi.fn().mockResolvedValue(client), { _client: client });
+    const adapter = createOpenCodeAdapter({ sdkFactory: factory });
+    const result = await adapter.executeRunAction({ runId: "run_1", actionId: "file.read", input: { path: "test.ts" } });
+    expect(client.file.read).toHaveBeenCalledWith({ path: "test.ts" });
+    expect(result.actionId).toBe("file.read");
+  });
+
+  it("file.status calls SDK file.status", async () => {
+    const client = createFakeOpenCodeSdkClient();
+    const factory: OpenCodeSdkFactory & { _client: OpenCodeSdkClient } = Object.assign(vi.fn().mockResolvedValue(client), { _client: client });
+    const adapter = createOpenCodeAdapter({ sdkFactory: factory });
+    const result = await adapter.executeRunAction({ runId: "run_1", actionId: "file.status", input: { path: "test.ts" } });
+    expect(client.file.status).toHaveBeenCalledWith({ path: "test.ts" });
+    expect(result.actionId).toBe("file.status");
+  });
+
+  it("tui actions call SDK tui methods", async () => {
+    const client = createFakeOpenCodeSdkClient();
+    const factory: OpenCodeSdkFactory & { _client: OpenCodeSdkClient } = Object.assign(vi.fn().mockResolvedValue(client), { _client: client });
+    const adapter = createOpenCodeAdapter({ sdkFactory: factory });
+
+    const tuiResults = await Promise.all([
+      adapter.executeRunAction({ runId: "run_1", actionId: "tui.appendPrompt", input: { text: "hello" } }),
+      adapter.executeRunAction({ runId: "run_1", actionId: "tui.openHelp", input: {} }),
+      adapter.executeRunAction({ runId: "run_1", actionId: "tui.openSessions", input: {} }),
+      adapter.executeRunAction({ runId: "run_1", actionId: "tui.openThemes", input: {} }),
+      adapter.executeRunAction({ runId: "run_1", actionId: "tui.openModels", input: {} }),
+      adapter.executeRunAction({ runId: "run_1", actionId: "tui.submitPrompt", input: { text: "hello" } }),
+      adapter.executeRunAction({ runId: "run_1", actionId: "tui.clearPrompt", input: {} }),
+      adapter.executeRunAction({ runId: "run_1", actionId: "tui.executeCommand", input: { command: "ls" } }),
+      adapter.executeRunAction({ runId: "run_1", actionId: "tui.showToast", input: { message: "hi" } }),
+    ]);
+    expect(tuiResults.every((r) => r.actionId.startsWith("tui."))).toBe(true);
+    expect(client.tui.appendPrompt).toHaveBeenCalled();
+    expect(client.tui.openHelp).toHaveBeenCalled();
+    expect(client.tui.openSessions).toHaveBeenCalled();
+    expect(client.tui.openThemes).toHaveBeenCalled();
+    expect(client.tui.openModels).toHaveBeenCalled();
+    expect(client.tui.submitPrompt).toHaveBeenCalled();
+    expect(client.tui.clearPrompt).toHaveBeenCalled();
+    expect(client.tui.executeCommand).toHaveBeenCalled();
+    expect(client.tui.showToast).toHaveBeenCalled();
+  });
+
+  it("tui actions are available but marked with sideEffect true", () => {
+    const adapter = createOpenCodeAdapter();
+    const tuiActions = adapter.listActions().filter((a) => a.id.startsWith("tui."));
+    expect(tuiActions.length).toBeGreaterThan(0);
+    expect(tuiActions.every((a) => a.sideEffects)).toBe(true);
+  });
+
+  it("getAuthStatus() reports OpenCode server/config auth when opencode is present", async () => {
+    const adapter = createOpenCodeAdapter({ detectCli: async () => ({ available: true, path: "/usr/local/bin/opencode" }) });
+    const status = await adapter.getAuthStatus();
+    expect(status.available).toBe(true);
+    expect(status.source).toBe("cli");
+  });
+
+  it("authMode: auto tries CLI first on startRun", async () => {
+    const cli = vi.fn().mockResolvedValue({ available: true, path: "/usr/local/bin/opencode" });
+    const sdkClient = createFakeOpenCodeSdkClient();
+    const factory: OpenCodeSdkFactory & { _client: OpenCodeSdkClient } = Object.assign(vi.fn().mockResolvedValue(sdkClient), { _client: sdkClient });
+    const adapter = createOpenCodeAdapter({ sdkFactory: factory, detectCli: cli });
+    const request: AgentRunRequest = { id: "run_1", createdAt: "now", provider: "opencode", prompt: "hi", authMode: "auto" };
+    await adapter.startRun(request);
+    expect(cli).toHaveBeenCalled();
+  });
+
+  it("authMode: cli fails with provider.auth_required when opencode CLI unavailable", async () => {
+    const adapter = createOpenCodeAdapter({ detectCli: async () => ({ available: false, path: null }) });
+    const request: AgentRunRequest = { id: "run_1", createdAt: "now", provider: "opencode", prompt: "hi", authMode: "cli" };
+    await expect(adapter.startRun(request)).rejects.toThrow(providerFailure("CLI auth required but opencode CLI not found", "opencode"));
+  });
+
+  it("authMode: sdk skips CLI detection on startRun", async () => {
+    const cli = vi.fn();
+    const sdkClient = createFakeOpenCodeSdkClient();
+    const factory: OpenCodeSdkFactory & { _client: OpenCodeSdkClient } = Object.assign(vi.fn().mockResolvedValue(sdkClient), { _client: sdkClient });
+    const adapter = createOpenCodeAdapter({ sdkFactory: factory, detectCli: cli });
+    const request: AgentRunRequest = { id: "run_1", createdAt: "now", provider: "opencode", prompt: "hi", authMode: "sdk" };
+    await adapter.startRun(request);
+    expect(cli).not.toHaveBeenCalled();
+  });
+
+  it("startRun creates a session, subscribes to events, calls session.prompt", async () => {
+    const client = createFakeOpenCodeSdkClient();
+    const factory: OpenCodeSdkFactory & { _client: OpenCodeSdkClient } = Object.assign(vi.fn().mockResolvedValue(client), { _client: client });
+    const adapter = createOpenCodeAdapter({ sdkFactory: factory });
+    const request: AgentRunRequest = { id: "run_1", createdAt: "2024-01-01T00:00:00Z", provider: "opencode", prompt: "hello" };
+    const run = await adapter.startRun(request);
+    expect(run.id).toBe("run_1");
+    expect(run.provider).toBe("opencode");
+    expect(run.status).toBe("running");
+    expect(client.session.create).toHaveBeenCalled();
+    expect(client.event.subscribe).toHaveBeenCalledWith("session_1", expect.any(Function));
+    expect(client.session.prompt).toHaveBeenCalledWith("session_1", expect.objectContaining({ prompt: "hello" }));
+  });
+
+  it("subscribed events are emitted raw and normalized through the eventBus", async () => {
+    const client = createFakeOpenCodeSdkClient();
+    const rawEvents: Record<string, unknown>[] = [
+      { type: "message.created", message: { id: "msg_1" } },
+      { type: "tool.start", tool: { id: "t1", name: "Read" } },
+    ];
+
+    let subscribeCallback: ((event: unknown) => void) | undefined;
+    const unsubscribe = vi.fn();
+    client.event.subscribe = vi.fn().mockImplementation(async (_sessionId: string, callback: (event: unknown) => void) => {
+      subscribeCallback = callback;
+      return unsubscribe;
+    });
+
+    const published: unknown[] = [];
+    const mockEventBus = { publish: vi.fn().mockImplementation((e: unknown) => { published.push(e); }) } as unknown as EventBus;
+    const factory: OpenCodeSdkFactory & { _client: OpenCodeSdkClient } = Object.assign(vi.fn().mockResolvedValue(client), { _client: client });
+    const adapter = createOpenCodeAdapter({ sdkFactory: factory, eventBus: mockEventBus });
+    const request: AgentRunRequest = { id: "run_1", createdAt: "now", provider: "opencode", prompt: "hello" };
+    await adapter.startRun(request);
+
+    expect(subscribeCallback).toBeDefined();
+
+    for (const rawEvent of rawEvents) {
+      await subscribeCallback!(rawEvent);
+    }
+
+    expect(mockEventBus.publish).toHaveBeenCalledTimes(2);
+    const emittedEvents = published.map((e: unknown) => (e as Record<string, unknown>));
+    expect(emittedEvents[0]?.type).toBe("message.started");
+    expect(emittedEvents[1]?.type).toBe("tool.started");
+  });
+
+  it("startRun maps permissionMode yolo to allow permissions where OpenCode rules support it", async () => {
+    const client = createFakeOpenCodeSdkClient();
+    const factory: OpenCodeSdkFactory & { _client: OpenCodeSdkClient } = Object.assign(vi.fn().mockResolvedValue(client), { _client: client });
+    const adapter = createOpenCodeAdapter({ sdkFactory: factory });
+    const request: AgentRunRequest = { id: "run_3", createdAt: "2024-01-01T00:00:00Z", provider: "opencode", prompt: "go wild", permissionMode: "yolo" };
+    await adapter.startRun(request);
+    expect(client.session.prompt).toHaveBeenCalledWith(
+      "session_1",
+      expect.objectContaining({ permissionMode: "yolo" })
+    );
+  });
+
+  it("startRun creates an AgentRun with correct defaults", async () => {
+    const adapter = createOpenCodeAdapter();
+    const request: AgentRunRequest = { id: "run_1", createdAt: "2024-01-01T00:00:00Z", provider: "opencode", prompt: "list files" };
+    const run = await adapter.startRun(request);
+    expect(run.id).toBe("run_1");
+    expect(run.provider).toBe("opencode");
+    expect(run.status).toBe("running");
+  });
+
+  it("cancelRun calls session.abort and returns cancelled run", async () => {
+    const client = createFakeOpenCodeSdkClient();
+    const factory: OpenCodeSdkFactory & { _client: OpenCodeSdkClient } = Object.assign(vi.fn().mockResolvedValue(client), { _client: client });
+    const adapter = createOpenCodeAdapter({ sdkFactory: factory });
+    const request: AgentRunRequest = { id: "run_1", createdAt: "now", provider: "opencode", prompt: "hello" };
+    await adapter.startRun(request);
+    const run = await adapter.cancelRun("run_1");
+    expect(run.status).toBe("cancelled");
+    expect(client.session.abort).toHaveBeenCalledWith("session_1");
+  });
+
+  it("resumeRun() returns a resumed run with running status", async () => {
+    const adapter = createOpenCodeAdapter();
+    const run = await adapter.resumeRun("run_1");
+    expect(run.id).toBe("run_1");
+    expect(run.status).toBe("running");
+  });
+
+  it("resolvePermission() routes to session.permission.reply", async () => {
+    const client = createFakeOpenCodeSdkClient();
+    const factory: OpenCodeSdkFactory & { _client: OpenCodeSdkClient } = Object.assign(vi.fn().mockResolvedValue(client), { _client: client });
+    const adapter = createOpenCodeAdapter({ sdkFactory: factory });
+    const request: AgentRunRequest = { id: "run_1", createdAt: "now", provider: "opencode", prompt: "hello" };
+    await adapter.startRun(request);
+    await adapter.resolvePermission("run_1", "perm_1", { decision: "allow", scope: "once" });
+    expect(client.session.permission.reply).toHaveBeenCalledWith(
+      "session_1", "perm_1", { decision: "allow", scope: "once" }
+    );
+  });
+});
