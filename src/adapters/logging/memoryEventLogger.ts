@@ -18,10 +18,16 @@ export class MemoryEventLogger implements EventLogger {
   }
 
   async log(entry: LogEntry): Promise<void> {
-    const redacted = {
-      ...entry,
-      data: entry.data ? (redactSecrets(entry.data) as Record<string, unknown>) : undefined,
+    const redacted: LogEntry = {
+      id: entry.id,
+      createdAt: entry.createdAt,
+      level: entry.level,
+      kind: entry.kind,
+      message: entry.message,
     };
+    if (entry.data !== undefined) {
+      redacted.data = redactSecrets(entry.data) as Record<string, unknown>;
+    }
 
     this.entries.push(redacted);
 

@@ -13,8 +13,8 @@ export function actionDescriptor(
     provider,
     scope,
     description: "",
-    inputSchema: z.object({}),
-    outputSchema: z.object({}),
+    inputSchema: z.object({}) as unknown as Record<string, unknown>,
+    outputSchema: z.object({}) as unknown as Record<string, unknown>,
     streaming,
     sideEffects,
   };

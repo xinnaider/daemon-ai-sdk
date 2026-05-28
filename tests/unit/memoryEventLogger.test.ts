@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { MemoryEventLogger } from "../../src/adapters/logging/memoryEventLogger.js";
+import type { LogEventKind } from "../../src/domain/logging.js";
 
 describe("MemoryEventLogger", () => {
   it("stores redacted log entries in insertion order", async () => {
@@ -9,7 +10,7 @@ describe("MemoryEventLogger", () => {
       id: "log_1",
       createdAt: "2026-05-28T00:00:00.000Z",
       level: "info",
-      kind: "request.input",
+      kind: "request.input" as LogEventKind,
       message: "run requested",
       data: { apiKey: "secret", prompt: "hello" }
     });
@@ -23,8 +24,8 @@ describe("MemoryEventLogger", () => {
 
   it("keeps only the configured number of entries", async () => {
     const logger = new MemoryEventLogger({ maxEntries: 1, echoToConsole: false });
-    await logger.log({ id: "log_1", createdAt: "a", level: "info", kind: "event.raw", message: "first" });
-    await logger.log({ id: "log_2", createdAt: "b", level: "info", kind: "event.raw", message: "second" });
+    await logger.log({ id: "log_1", createdAt: "a", level: "info", kind: "event.raw" as LogEventKind, message: "first" });
+    await logger.log({ id: "log_2", createdAt: "b", level: "info", kind: "event.raw" as LogEventKind, message: "second" });
 
     expect((await logger.list()).map((entry) => entry.id)).toEqual(["log_2"]);
   });
