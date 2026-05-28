@@ -34,6 +34,7 @@ export class EventBus {
   }
 
   replay(runId: string): DaemonEvent[] {
+    if (runId === "all") return [...this.events];
     return this.events.filter((e) => e.runId === runId);
   }
 

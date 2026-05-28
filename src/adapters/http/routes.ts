@@ -1,10 +1,11 @@
-import type { FastifyInstance } from "fastify";
+import type { FastifyInstance, FastifyRequest, FastifyReply } from "fastify";
 import { z } from "zod";
 import type { ExecutionService } from "../../application/executionService.js";
 import type { ProviderRegistry } from "../providers/common/providerRegistry.js";
 import type { RunRegistry } from "../../application/runRegistry.js";
 import type { EventBus } from "../../application/eventBus.js";
 import type { EventLogger } from "../../ports/eventLogger.js";
+import { writeSseHeaders, sendSseEvent, sendSseHeartbeat } from "./sse.js";
 
 export interface ServerDeps {
   providers: ProviderRegistry;
@@ -152,5 +153,58 @@ export function registerRoutes(app: FastifyInstance, deps: ServerDeps): void {
       ...parsed.data,
     });
     return result;
+  });
+
+  app.get("/runs/:runId/events", async (req, reply) => {
+    const raw = reply.raw;
+    writeSseHeaders(raw);
+
+    const runId = (req.params as Record<string, string>).runId;
+    const prior = deps.events.replay(runId);
+    for (const event of prior) {
+      sendSseEvent(raw, event);
+    }
+
+    const unsub = deps.events.subscribe(runId, (event) => {
+      sendSseEvent(raw, event);
+    });
+
+    const heartbeat = setInterval(() => {
+      sendSseHeartbeat(raw);
+    }, 15_000);
+
+    await new Promise<void>((resolve) => {
+      raw.on("close", () => {
+        unsub();
+        clearInterval(heartbeat);
+        resolve();
+      });
+    });
+  });
+
+  app.get("/events", async (req, reply) => {
+    const raw = reply.raw;
+    writeSseHeaders(raw);
+
+    const prior = deps.events.replay("all");
+    for (const event of prior) {
+      sendSseEvent(raw, event);
+    }
+
+    const unsub = deps.events.subscribe("all", (event) => {
+      sendSseEvent(raw, event);
+    });
+
+    const heartbeat = setInterval(() => {
+      sendSseHeartbeat(raw);
+    }, 15_000);
+
+    await new Promise<void>((resolve) => {
+      raw.on("close", () => {
+        unsub();
+        clearInterval(heartbeat);
+        resolve();
+      });
+    });
   });
 }
