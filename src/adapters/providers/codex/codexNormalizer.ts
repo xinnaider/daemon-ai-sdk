@@ -1,17 +1,7 @@
-import type { DaemonEvent, DaemonEventType } from "../../../domain/events.js";
+import type { DaemonEvent } from "../../../domain/events.js";
 import type { NormalizeInput } from "../../../application/eventNormalizer.js";
-
-function evt(input: NormalizeInput, type: string, extra: Record<string, unknown> = {}): DaemonEvent {
-  return {
-    id: `evt_${input.sequence}`,
-    runId: input.runId,
-    provider: input.provider,
-    type: type as DaemonEventType,
-    createdAt: new Date().toISOString(),
-    sequence: input.sequence,
-    data: { raw: input.raw, ...extra },
-  };
-}
+import { registerNormalizer } from "../../../application/eventNormalizer.js";
+import { createNormalizedEvents, createNormalizedEvent } from "../../../application/eventFactory.js";
 
 export function normalizeCodexEvent(input: NormalizeInput): DaemonEvent[] {
   const raw = input.raw as Record<string, unknown>;
@@ -19,22 +9,22 @@ export function normalizeCodexEvent(input: NormalizeInput): DaemonEvent[] {
 
   switch (eventType) {
     case "thread.started":
-      return [evt(input, "session.discovered")];
+      return [createNormalizedEvent(input, "session.discovered")];
 
     case "turn.started":
-      return [evt(input, "run.started")];
+      return [createNormalizedEvent(input, "run.started")];
 
     case "turn.completed": {
       const events: DaemonEvent[] = [];
       if (raw.data && typeof raw.data === "object") {
-        events.push(evt(input, "usage.updated", { usage: (raw.data as Record<string, unknown>).usage }));
+        events.push(createNormalizedEvent(input, "usage.updated", { usage: (raw.data as Record<string, unknown>).usage }));
       }
-      events.push(evt(input, "run.completed"));
+      events.push(createNormalizedEvent(input, "run.completed"));
       return events;
     }
 
     case "turn.failed":
-      return [evt(input, "run.failed")];
+      return [createNormalizedEvent(input, "run.failed")];
 
     case "item.started":
     case "item.updated":
@@ -46,54 +36,36 @@ export function normalizeCodexEvent(input: NormalizeInput): DaemonEvent[] {
 
       switch (itemType) {
         case "agent_message":
-          return [
-            evt(input, "message.started"),
-            evt(input, "message.delta"),
-            evt(input, "message.completed"),
-          ];
+          return createNormalizedEvents(input, ["message.started", "message.delta", "message.completed"]);
         case "reasoning":
-          return [
-            evt(input, "reasoning.started"),
-            evt(input, "reasoning.delta"),
-            evt(input, "reasoning.completed"),
-          ];
+          return createNormalizedEvents(input, ["reasoning.started", "reasoning.delta", "reasoning.completed"]);
         case "command_execution": {
-          const events = [
-            evt(input, "tool.started"),
-            evt(input, "tool.delta"),
-          ];
           if (hasError) {
-            events.push(evt(input, "tool.failed"));
-          } else {
-            events.push(evt(input, "tool.completed"));
+            return createNormalizedEvents(input, ["tool.started", "tool.delta", "tool.failed"]);
           }
-          return events;
+          return createNormalizedEvents(input, ["tool.started", "tool.delta", "tool.completed"]);
         }
         case "file_change":
-          return [evt(input, "file.changed")];
+          return [createNormalizedEvent(input, "file.changed")];
         case "mcp_tool_call":
-          return [
-            evt(input, "tool.started"),
-            evt(input, "tool.completed"),
-          ];
+          return createNormalizedEvents(input, ["tool.started", "tool.completed"]);
         case "web_search":
-          return [
-            evt(input, "tool.started"),
-            evt(input, "tool.completed"),
-          ];
+          return createNormalizedEvents(input, ["tool.started", "tool.completed"]);
         case "todo_list":
-          return [evt(input, "todo.updated")];
+          return [createNormalizedEvent(input, "todo.updated")];
         case "error":
-          return [evt(input, "tool.failed")];
+          return [createNormalizedEvent(input, "tool.failed")];
         default:
-          return [evt(input, "unknown")];
+          return [createNormalizedEvent(input, "unknown")];
       }
     }
 
     case "error":
-      return [evt(input, "run.failed")];
+      return [createNormalizedEvent(input, "run.failed")];
 
     default:
-      return [evt(input, "unknown")];
+      return [createNormalizedEvent(input, "unknown")];
   }
 }
+
+registerNormalizer("codex", normalizeCodexEvent);

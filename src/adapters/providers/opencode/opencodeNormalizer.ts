@@ -1,17 +1,7 @@
-import type { DaemonEvent, DaemonEventType } from "../../../domain/events.js";
+import type { DaemonEvent } from "../../../domain/events.js";
 import type { NormalizeInput } from "../../../application/eventNormalizer.js";
-
-function evt(input: NormalizeInput, type: string, extra: Record<string, unknown> = {}): DaemonEvent {
-  return {
-    id: `evt_${input.sequence}`,
-    runId: input.runId,
-    provider: input.provider,
-    type: type as DaemonEventType,
-    createdAt: new Date().toISOString(),
-    sequence: input.sequence,
-    data: { raw: input.raw, ...extra },
-  };
-}
+import { registerNormalizer } from "../../../application/eventNormalizer.js";
+import { createNormalizedEvent, createNormalizedEvents } from "../../../application/eventFactory.js";
 
 export function normalizeOpenCodeEvent(input: NormalizeInput): DaemonEvent[] {
   const raw = input.raw as Record<string, unknown>;
@@ -20,51 +10,50 @@ export function normalizeOpenCodeEvent(input: NormalizeInput): DaemonEvent[] {
   switch (eventType) {
     case "session.created":
     case "child_session":
-      return [evt(input, "session.discovered")];
+      return [createNormalizedEvent(input, "session.discovered")];
 
     case "session.updated":
-      return [evt(input, "session.updated")];
+      return [createNormalizedEvent(input, "session.updated")];
 
     case "session.deleted":
-      return [evt(input, "session.deleted")];
+      return [createNormalizedEvent(input, "session.deleted")];
 
     case "message.created":
-      return [evt(input, "message.started")];
+      return [createNormalizedEvent(input, "message.started")];
 
     case "message.updated":
-      return [
-        evt(input, "message.delta"),
-        evt(input, "message.completed"),
-      ];
+      return createNormalizedEvents(input, ["message.delta", "message.completed"]);
 
     case "part.text_delta":
-      return [evt(input, "message.delta")];
+      return [createNormalizedEvent(input, "message.delta")];
 
     case "tool.start":
-      return [evt(input, "tool.started")];
+      return [createNormalizedEvent(input, "tool.started")];
 
     case "tool.update":
-      return [evt(input, "tool.delta")];
+      return [createNormalizedEvent(input, "tool.delta")];
 
     case "tool.finish":
-      return [evt(input, "tool.completed")];
+      return [createNormalizedEvent(input, "tool.completed")];
 
     case "permission.request":
-      return [evt(input, "permission.requested")];
+      return [createNormalizedEvent(input, "permission.requested")];
 
     case "permission.reply":
-      return [evt(input, "permission.resolved")];
+      return [createNormalizedEvent(input, "permission.resolved")];
 
     case "file.status_update":
-      return [evt(input, "file.changed")];
+      return [createNormalizedEvent(input, "file.changed")];
 
     case "error":
-      return [evt(input, "run.failed")];
+      return [createNormalizedEvent(input, "run.failed")];
 
     case "tokens.cost":
-      return [evt(input, "usage.updated")];
+      return [createNormalizedEvent(input, "usage.updated")];
 
     default:
-      return [evt(input, "unknown")];
+      return [createNormalizedEvent(input, "unknown")];
   }
 }
+
+registerNormalizer("opencode", normalizeOpenCodeEvent);
