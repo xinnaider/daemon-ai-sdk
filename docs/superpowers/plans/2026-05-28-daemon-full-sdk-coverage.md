@@ -2,9 +2,9 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Build a standalone TypeScript daemon with HTTP, SSE, normalized events, centralized logging, permission mediation, and full enumerated SDK action coverage for OpenCode, Codex, and Claude Agent SDK.
+**Goal:** Build a standalone TypeScript daemon with HTTP, SSE, CLI-auth-first provider access, normalized events, centralized logging, permission mediation, and full enumerated SDK action coverage for OpenCode, Codex, and Claude Agent SDK.
 
-**Architecture:** Use ports and adapters. Domain and application code owns daemon concepts; SDK imports stay inside provider adapters. SDK coverage is exposed through two public surfaces: run lifecycle endpoints for streaming agent work, and enumerated SDK action endpoints for every supported non-run or run-bound SDK call.
+**Architecture:** Use ports and adapters. Domain and application code owns daemon concepts; SDK and CLI/local-auth detection stay inside provider adapters. SDK coverage is exposed through two public surfaces: run lifecycle endpoints for streaming agent work, and enumerated SDK action endpoints for every supported non-run or run-bound SDK call. Provider authentication defaults to `authMode: "auto"`, which tries CLI/local server credentials before explicit SDK/API-key credentials.
 
 **Tech Stack:** Node.js 20+, TypeScript, Fastify, Vitest, Zod, `@opencode-ai/sdk`, `@openai/codex-sdk`, `@anthropic-ai/claude-agent-sdk`.
 
@@ -29,6 +29,7 @@ src/domain/events.ts
 src/domain/permissions.ts
 src/domain/providers.ts
 src/domain/runs.ts
+src/domain/auth.ts
 src/domain/logging.ts
 src/domain/errors.ts
 src/application/eventBus.ts
@@ -57,6 +58,7 @@ src/adapters/providers/opencode/opencodeAdapter.ts
 src/adapters/providers/opencode/opencodeClient.ts
 src/adapters/providers/opencode/opencodeNormalizer.ts
 src/infrastructure/config.ts
+src/infrastructure/cli.ts
 src/infrastructure/ids.ts
 src/infrastructure/redaction.ts
 src/infrastructure/time.ts
@@ -66,6 +68,7 @@ tests/fixtures/codexEvents.ts
 tests/fixtures/claudeMessages.ts
 tests/fixtures/opencodeEvents.ts
 tests/unit/domain.test.ts
+tests/unit/auth.test.ts
 tests/unit/redaction.test.ts
 tests/unit/memoryEventLogger.test.ts
 tests/unit/eventBus.test.ts
@@ -331,19 +334,22 @@ git commit -m "chore: scaffold TypeScript daemon project"
 
 ---
 
-### Task 2: Domain Types, Errors, IDs, Time, and Redaction
+### Task 2: Domain Types, Auth, Errors, IDs, Time, and Redaction
 
 **Files:**
 - Create: `src/domain/events.ts`
 - Create: `src/domain/permissions.ts`
 - Create: `src/domain/providers.ts`
 - Create: `src/domain/runs.ts`
+- Create: `src/domain/auth.ts`
 - Create: `src/domain/logging.ts`
 - Create: `src/domain/errors.ts`
+- Create: `src/infrastructure/cli.ts`
 - Create: `src/infrastructure/ids.ts`
 - Create: `src/infrastructure/time.ts`
 - Create: `src/infrastructure/redaction.ts`
 - Test: `tests/unit/domain.test.ts`
+- Test: `tests/unit/auth.test.ts`
 - Test: `tests/unit/redaction.test.ts`
 
 - [ ] **Step 1: Write failing domain tests**
@@ -384,12 +390,43 @@ describe("domain model", () => {
       createdAt: "2026-05-28T00:00:00.000Z",
       provider: "claude",
       prompt: "inspect repo",
+      authMode: "auto",
       permissionMode: "normal"
     });
 
     expect(run.status).toBe("queued");
     expect(run.provider).toBe("claude");
+    expect(run.authMode).toBe("auto");
     expect(run.permissionMode).toBe("normal");
+  });
+});
+```
+
+Create `tests/unit/auth.test.ts`:
+
+```ts
+import { describe, expect, it, vi } from "vitest";
+import { resolveAuthMode } from "../../src/domain/auth.js";
+import { detectCli } from "../../src/infrastructure/cli.js";
+
+describe("auth mode", () => {
+  it("defaults run requests to auto auth mode", () => {
+    expect(resolveAuthMode(undefined)).toBe("auto");
+  });
+
+  it("accepts explicit cli and sdk auth modes", () => {
+    expect(resolveAuthMode("cli")).toBe("cli");
+    expect(resolveAuthMode("sdk")).toBe("sdk");
+  });
+});
+
+describe("detectCli", () => {
+  it("returns unavailable when a binary cannot be found", async () => {
+    const execFile = vi.fn().mockRejectedValue(new Error("not found"));
+    await expect(detectCli("missing-cli", execFile)).resolves.toEqual({
+      available: false,
+      path: null
+    });
   });
 });
 ```
@@ -428,16 +465,18 @@ describe("redactSecrets", () => {
 Run:
 
 ```powershell
-npx vitest run tests/unit/domain.test.ts tests/unit/redaction.test.ts
+npx vitest run tests/unit/domain.test.ts tests/unit/auth.test.ts tests/unit/redaction.test.ts
 ```
 
-Expected: FAIL because `src/domain/events.ts`, `src/domain/runs.ts`, and `src/infrastructure/redaction.ts` do not exist.
+Expected: FAIL because `src/domain/events.ts`, `src/domain/runs.ts`, `src/domain/auth.ts`, `src/infrastructure/cli.ts`, and `src/infrastructure/redaction.ts` do not exist.
 
 - [ ] **Step 3: Implement domain and utility files**
 
 Create `src/domain/events.ts` with `ProviderId`, `DaemonEventType`, `DaemonEvent`, `createDaemonEvent`, `ProviderRawEvent`, and `ProviderEventSink`.
 
-Create `src/domain/runs.ts` with `PermissionMode`, `RunStatus`, `ProviderInputPart`, `AgentRunRequest`, `AgentRun`, and `createRun`.
+Create `src/domain/auth.ts` with `AuthMode`, `ProviderAuthStatus`, and `resolveAuthMode`. `resolveAuthMode(undefined)` returns `"auto"` and rejects unknown values by throwing `badRequest`.
+
+Create `src/domain/runs.ts` with `PermissionMode`, `RunStatus`, `ProviderInputPart`, `AgentRunRequest`, `AgentRun`, and `createRun`. `createRun` stores `authMode` and defaults it to `"auto"`.
 
 Create `src/domain/permissions.ts` with `PermissionDecision`, `PermissionScope`, `PermissionRequest`, `PermissionResolution`, and `PendingPermission`.
 
@@ -465,6 +504,8 @@ export function nowIso(): string {
 }
 ```
 
+Create `src/infrastructure/cli.ts` with `detectCli(binary, execFile = nodeExecFile)` using `where.exe` on Windows and `which` elsewhere. It returns `{ available: boolean; path: string | null }`.
+
 Create `src/infrastructure/redaction.ts` with recursive object and array redaction for keys containing `key`, `token`, `secret`, `password`, or `authorization`.
 
 - [ ] **Step 4: Run tests to verify green**
@@ -472,7 +513,7 @@ Create `src/infrastructure/redaction.ts` with recursive object and array redacti
 Run:
 
 ```powershell
-npx vitest run tests/unit/domain.test.ts tests/unit/redaction.test.ts
+npx vitest run tests/unit/domain.test.ts tests/unit/auth.test.ts tests/unit/redaction.test.ts
 ```
 
 Expected: PASS.
@@ -482,8 +523,8 @@ Expected: PASS.
 Run:
 
 ```powershell
-git add src/domain src/infrastructure tests/unit/domain.test.ts tests/unit/redaction.test.ts
-git commit -m "feat: add daemon domain contracts and redaction"
+git add src/domain src/infrastructure tests/unit/domain.test.ts tests/unit/auth.test.ts tests/unit/redaction.test.ts
+git commit -m "feat: add daemon domain contracts auth and redaction"
 ```
 
 ---
@@ -982,6 +1023,7 @@ Add tests that:
 - register three providers;
 - reject duplicate IDs;
 - return action descriptors per provider;
+- return auth status per provider;
 - execute only registered action IDs;
 - throw `DaemonError` for unknown provider or action.
 
@@ -997,9 +1039,9 @@ Expected: FAIL because registry and port do not exist.
 
 - [ ] **Step 3: Implement port and registry**
 
-`AgentProvider` must include `getCapabilities`, `listActions`, `executeProviderAction`, `executeRunAction`, `startRun`, `resumeRun`, `cancelRun`, and `resolvePermission`.
+`AgentProvider` must include `getCapabilities`, `getAuthStatus`, `listActions`, `executeProviderAction`, `executeRunAction`, `startRun`, `resumeRun`, `cancelRun`, and `resolvePermission`.
 
-`ProviderRegistry` must expose `register`, `get`, `list`, `actionsFor`, `executeProviderAction`, and `executeRunAction`.
+`ProviderRegistry` must expose `register`, `get`, `list`, `authStatusFor`, `actionsFor`, `executeProviderAction`, and `executeRunAction`.
 
 - [ ] **Step 4: Run test to verify green**
 
@@ -1040,6 +1082,10 @@ Use an injected fake SDK factory. Assert that:
 - `thread.run` calls buffered `thread.run`;
 - `thread.runStreamed` calls `thread.runStreamed` and forwards every raw event to the sink;
 - `turn.cancel` aborts the active `AbortController`;
+- `getAuthStatus()` reports CLI auth when `codex` is present and login status can be detected;
+- `authMode: "auto"` selects CLI/local auth before SDK/API-key auth;
+- `authMode: "cli"` fails with `provider.auth_required` when Codex CLI auth is unavailable;
+- `authMode: "sdk"` uses explicit SDK/API-key environment credentials only;
 - run input maps `cwd`, `model`, `modelReasoningEffort`, `approvalPolicy`, `sandboxMode`, `networkAccessEnabled`, `webSearchMode`, `webSearchEnabled`, `skipGitRepoCheck`, `additionalDirectories`, `outputSchema`, `env`, and multimodal prompt input.
 
 - [ ] **Step 2: Run test to verify red**
@@ -1069,6 +1115,9 @@ The real factory imports `Codex` from `@openai/codex-sdk`.
 
 - expose all action descriptors from `codexActions`;
 - keep active thread and abort handles by daemon run ID;
+- detect `codex` CLI availability and local login status for `authMode: "auto"` and `authMode: "cli"`;
+- prefer CLI/local credentials in `authMode: "auto"`;
+- use SDK/API env credentials only in `authMode: "sdk"` or as fallback when `authMode: "auto"` has no CLI credentials;
 - map `permissionMode: "normal"` to `approvalPolicy: "on-request"` and safe sandbox;
 - map `permissionMode: "yolo"` to `approvalPolicy: "never"` and `sandboxMode: "danger-full-access"`;
 - emit provider warnings for permission callback limitations;
@@ -1117,6 +1166,10 @@ Assert that:
 - `permissionMode: "yolo"` maps to `bypassPermissions`;
 - run-bound query actions call the active Query methods listed in the action coverage contract;
 - provider-level session actions call the matching SDK functions.
+- `getAuthStatus()` reports Claude Code local auth when `claude` is present and status can be detected;
+- `authMode: "auto"` selects Claude Code/local Agent SDK auth before explicit API-key auth;
+- `authMode: "cli"` fails with `provider.auth_required` when local Claude auth is unavailable;
+- `authMode: "sdk"` uses `ANTHROPIC_API_KEY`, Workload Identity Federation, cloud-provider auth, or explicit token env only.
 
 - [ ] **Step 2: Run test to verify red**
 
@@ -1153,6 +1206,10 @@ The real facade imports these functions from `@anthropic-ai/claude-agent-sdk`.
 
 - expose all action descriptors from `claudeActions`;
 - keep active Query handles by daemon run ID;
+- detect `claude` CLI availability and local auth status;
+- prefer Claude Code/local Agent SDK credentials in `authMode: "auto"` when permitted by the user's use case;
+- use explicit SDK/API credentials only in `authMode: "sdk"` or as fallback when `authMode: "auto"` has no local credentials;
+- surface Anthropic legal/compliance caveats in capability metadata rather than silently routing subscription credentials for productized third-party usage;
 - implement provider-level session/tool/MCP actions;
 - implement run-bound Query method actions;
 - convert `canUseTool` requests into daemon pending permission requests and return SDK `PermissionResult`;
@@ -1195,6 +1252,10 @@ Assert that:
 
 - `getCapabilities()` includes every OpenCode action ID;
 - every action ID calls the matching nested SDK method;
+- `getAuthStatus()` reports OpenCode server/config auth from `opencode serve`, `/connect`, `auth.json`, local providers, or provider env metadata;
+- `authMode: "auto"` connects to OpenCode's local server/config before attempting SDK/API-key style credentials;
+- `authMode: "cli"` fails with `provider.auth_required` when OpenCode local server/config auth is unavailable;
+- `authMode: "sdk"` uses only explicit provider env/config passed to the SDK client;
 - `startRun` creates or reuses a session, calls `session.prompt`, and subscribes through `event.subscribe`;
 - every subscribed event is emitted raw and normalized;
 - `session.permission.reply` calls `postSessionByIdPermissionsByPermissionId` or the generated equivalent;
@@ -1229,6 +1290,9 @@ The real factory imports `createOpencode` and `createOpencodeClient` from `@open
 
 - expose all action descriptors from `opencodeActions`;
 - route action IDs through an explicit `switch`;
+- prefer `opencode serve` and `createOpencodeClient()` in `authMode: "auto"` and `authMode: "cli"`;
+- use `createOpencode()` direct/server mode only when explicitly configured or when local server startup is owned by the daemon;
+- report OpenCode provider auth sources without reading or logging secret values from `auth.json`;
 - store OpenCode session IDs by daemon run ID;
 - subscribe to raw events per run;
 - map daemon permission resolutions to OpenCode permission reply calls;
@@ -1349,6 +1413,7 @@ Test with Fastify injection:
 
 - `GET /health`;
 - `GET /providers`;
+- `GET /providers` includes auth metadata for each provider: `mode`, `available`, `source`, and `requiresApiKey`;
 - `GET /providers/:provider/actions`;
 - `POST /providers/:provider/actions`;
 - `POST /runs`;
@@ -1363,6 +1428,7 @@ Test with Fastify injection:
 - `POST /runs/:runId/actions`;
 - invalid provider returns 404;
 - invalid request body returns 400.
+- `POST /runs` defaults missing `authMode` to `"auto"`.
 
 - [ ] **Step 2: Run tests to verify red**
 
@@ -1598,6 +1664,11 @@ git commit -m "docs: generate SDK coverage matrix from action registry"
 - `npm start`;
 - `npm test`;
 - opt-in smoke tests.
+- CLI-auth-first setup:
+  - authenticate Claude through `claude`;
+  - authenticate Codex through `codex --login`;
+  - authenticate OpenCode through `/connect`, local providers, or `opencode serve`;
+  - explain that API keys are optional fallback credentials.
 
 `http-and-sse.md` must include curl examples for:
 
@@ -1617,6 +1688,8 @@ git commit -m "docs: generate SDK coverage matrix from action registry"
 - Claude adapter behavior;
 - `normal` and `yolo` permission mapping;
 - known limitations surfaced as capabilities.
+- `authMode: "auto" | "cli" | "sdk"` behavior.
+- Provider auth detection and fallback behavior.
 
 `events.md` must include:
 
@@ -1659,9 +1732,11 @@ Smoke tests must skip unless `RUN_REAL_SDK_TESTS=1`.
 Cover:
 
 - `GET /providers` with real adapters constructed;
-- Claude minimal query when `ANTHROPIC_API_KEY` or `CLAUDE_CODE_OAUTH_TOKEN` is present;
-- Codex minimal streamed run when `OPENAI_API_KEY` or `CODEX_API_KEY` is present;
-- OpenCode health/config when `OPENCODE_DAEMON_REAL_TEST=1`.
+- Claude auth status without requiring an API key when local Claude Code auth is detected;
+- Claude minimal query when `ANTHROPIC_API_KEY`, `CLAUDE_CODE_OAUTH_TOKEN`, or permitted local Claude Code auth is present;
+- Codex auth status without requiring an API key when Codex CLI login is detected;
+- Codex minimal streamed run when `OPENAI_API_KEY`, `CODEX_API_KEY`, or Codex CLI login is present;
+- OpenCode health/config when `OPENCODE_DAEMON_REAL_TEST=1`, preferring existing OpenCode server/config auth.
 
 - [ ] **Step 2: Run smoke test default**
 
@@ -1740,6 +1815,7 @@ Spec coverage:
 
 - HTTP server: Tasks 13 and 15.
 - SSE: Tasks 4 and 14.
+- CLI-auth-first provider access: Tasks 2, 8, 9, 10, 11, 13, 17, and 18.
 - Event normalization: Task 7.
 - Centralized logging: Task 3 and Task 12.
 - Permission protocol: Task 5, Task 10, Task 11, Task 12, and Task 13.
@@ -1757,6 +1833,7 @@ Placeholder scan:
 Type consistency:
 
 - Provider IDs are `opencode`, `codex`, and `claude`.
+- Auth modes are `auto`, `cli`, and `sdk`.
 - Permission modes are `normal` and `yolo`.
 - Public SDK action endpoints are `POST /providers/:provider/actions` and `POST /runs/:runId/actions`.
 - Run lifecycle endpoints are `POST /runs`, `POST /runs/:provider`, `POST /runs/:runId/resume`, `POST /runs/:runId/cancel`, and `POST /runs/:runId/permissions/:permissionId`.

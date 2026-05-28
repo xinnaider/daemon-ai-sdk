@@ -16,6 +16,7 @@ The first implementation will ship the core functional path first: create runs, 
 - Do not hide provider-specific data behind lossy abstractions.
 - Do not build a UI.
 - Do not shell out to CLIs when a supported SDK API exists for the same operation, unless the SDK itself wraps the CLI internally.
+- Do not require users to paste API keys into the daemon when the provider CLI already has a supported local authentication flow.
 
 ## References
 
@@ -23,10 +24,15 @@ The first implementation will ship the core functional path first: create runs, 
 - Paseo: https://github.com/getpaseo/paseo
 - OpenCode SDK: https://opencode.ai/docs/sdk/
 - OpenCode permissions: https://opencode.ai/docs/permissions/
+- OpenCode providers/auth config: https://opencode.ai/docs/providers/
 - Codex SDK: https://developers.openai.com/codex/sdk
 - Codex TypeScript SDK source: https://github.com/openai/codex/tree/main/sdk/typescript
+- Codex CLI sign-in with ChatGPT: https://help.openai.com/en/articles/11381614-api-codex-cli-and-sign-in-with-chatgpt
 - Claude Agent SDK TypeScript reference: https://platform.claude.com/docs/en/agent-sdk/typescript
 - Claude Agent SDK permissions: https://platform.claude.com/docs/en/agent-sdk/permissions
+- Claude Code authentication: https://code.claude.com/docs/en/authentication
+- Claude Code legal/compliance authentication notes: https://code.claude.com/docs/en/legal-and-compliance
+- Paseo security posture: https://github.com/getpaseo/paseo/blob/main/SECURITY.md
 
 ## Architectural Decisions
 
@@ -54,6 +60,11 @@ The first implementation will ship the core functional path first: create runs, 
    - `permissionMode: "normal"` emits `permission.requested` and waits for HTTP resolution when the SDK supports interactive permission callbacks;
    - `permissionMode: "yolo"` maps to each provider's bypass or allow-all behavior when supported;
    - unsupported permission behavior is reported through capability metadata and a normalized warning/error event.
+9. Authentication is CLI-auth-first:
+   - `authMode: "auto"` is the default and tries provider CLI/local auth before SDK API-key auth;
+   - `authMode: "cli"` uses only existing local CLI/server authentication;
+   - `authMode: "sdk"` uses only SDK/API-key or explicit token environment variables;
+   - API keys are optional fallback credentials, not required for starting the daemon.
 
 ## Stack
 
@@ -67,6 +78,50 @@ The first implementation will ship the core functional path first: create runs, 
   - `@opencode-ai/sdk`
   - `@openai/codex-sdk`
   - `@anthropic-ai/claude-agent-sdk`
+
+## Authentication Model
+
+The daemon does not own provider account authentication by default. It controls orchestration, HTTP/SSE, logs, permissions, and event normalization. Model-provider authentication should remain with the provider tool wherever possible.
+
+```ts
+type AuthMode = "auto" | "cli" | "sdk";
+```
+
+Default behavior:
+
+```text
+auto:
+  1. Try existing CLI/local server authentication.
+  2. If unavailable, try explicit SDK/API environment credentials.
+  3. If unavailable, report provider.auth_required in capabilities and events.
+
+cli:
+  Use only local provider CLI/server credentials.
+
+sdk:
+  Use only explicit SDK/API credentials.
+```
+
+Provider mapping:
+
+- OpenCode: prefer `opencode serve` plus `@opencode-ai/sdk` client connection, using OpenCode's existing `/connect`, `auth.json`, provider config, local models, OpenCode Zen/Go, or provider env vars.
+- Codex: prefer the authenticated Codex CLI account, including `codex --login` / ChatGPT sign-in where available. SDK/API-key credentials remain an explicit fallback.
+- Claude: prefer Claude Code's local authentication where supported by the Agent SDK and user's permitted use case. API keys, Workload Identity Federation, cloud-provider auth, or `CLAUDE_CODE_OAUTH_TOKEN` remain explicit alternatives. Productized or third-party usage must respect Anthropic's authentication policy.
+
+`GET /providers` must expose auth status:
+
+```json
+{
+  "id": "codex",
+  "auth": {
+    "mode": "cli",
+    "available": true,
+    "source": "codex-login",
+    "requiresApiKey": false,
+    "message": "Codex CLI credentials detected"
+  }
+}
+```
 
 ## Project Structure
 
@@ -135,10 +190,12 @@ type RunStatus =
   | "cancelled";
 
 type PermissionMode = "normal" | "yolo";
+type AuthMode = "auto" | "cli" | "sdk";
 
 type AgentRunRequest = {
   provider: ProviderId;
   prompt: string | ProviderInputPart[];
+  authMode?: AuthMode;
   cwd?: string;
   model?: string;
   permissionMode: PermissionMode;
@@ -772,10 +829,20 @@ OpenCode:
 
 OpenCode reads provider-specific environment variables according to its config and provider list. The daemon must pass per-run `env` overrides to the OpenCode SDK/server where supported and must never log secret values.
 
+Provider API keys are optional. The preferred local workflow is to authenticate each provider through its own CLI or local server first:
+
+```text
+claude        # login/configure Claude Code
+codex --login # login/configure Codex CLI
+opencode      # /connect or configure providers/local models
+```
+
 ## Security and Logging Rules
 
 - Redact environment values and API keys before logging.
 - Log key names, not secret values.
+- Do not persist provider secrets in daemon memory longer than the SDK call requires.
+- Do not copy subscription/OAuth credentials out of provider-owned storage.
 - `permissionMode: "yolo"` must be explicit per run.
 - `danger-full-access` or equivalent must never be implied by default.
 - `cwd` is accepted as input but logged as a path string only.
@@ -801,6 +868,9 @@ Each implementation phase must update documentation before the phase is consider
 - TypeScript project compiles.
 - HTTP server starts and exposes `/health`.
 - `GET /providers` returns OpenCode, Codex, Claude capability metadata.
+- `GET /providers` reports `auth.mode`, `auth.available`, `auth.source`, and `auth.requiresApiKey` for each provider.
+- The daemon starts without provider API keys.
+- Run requests support `authMode: "auto" | "cli" | "sdk"` and default to `auto`.
 - `GET /providers/:provider/actions` lists all daemon-supported SDK calls for that provider.
 - `POST /providers/:provider/actions` executes provider-level SDK calls from the enumerated action registry.
 - `POST /runs/:runId/actions` executes run-bound SDK calls from the enumerated action registry.
