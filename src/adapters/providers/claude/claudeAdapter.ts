@@ -67,30 +67,6 @@ export class ClaudeAdapter implements AgentProvider {
     let output: unknown;
 
     switch (request.actionId) {
-      case "query.run": {
-        const { sink, ...queryInput } = request.input as Record<string, unknown> & { sink?: ProviderEventSink };
-        const query = facade.query(queryInput as unknown as QueryOptions);
-        if (sink && queryInput.onStreamEvent) {
-          const originalCallback = queryInput.onStreamEvent as (event: unknown) => void;
-          const wrappedCallback = (event: unknown) => {
-            originalCallback(event);
-            const daemonEvents = normalizeClaudeMessage({
-              provider: "claude",
-              raw: event,
-              runId: "",
-              sequence: 0,
-            });
-            for (const de of daemonEvents) {
-              sink.emit(de).catch(() => {});
-            }
-          };
-          facade.query({ ...queryInput as unknown as QueryOptions, onStreamEvent: wrappedCallback });
-          output = { queryStarted: true };
-        } else {
-          output = { queryStarted: true };
-        }
-        break;
-      }
       case "tool.create": {
         output = await facade.tool.create(request.input);
         break;
@@ -271,7 +247,14 @@ export class ClaudeAdapter implements AgentProvider {
       signal: controller.signal,
       permissionMode,
       canUseTool,
+      includePartialMessages: true,
     };
+
+    if (request.cwd) queryOptions.cwd = request.cwd;
+    if (request.model) queryOptions.model = request.model;
+    if (request.maxTurns !== undefined) queryOptions.maxTurns = request.maxTurns;
+    if (request.mcpServers) queryOptions.mcpServers = request.mcpServers;
+    if (request.agents) queryOptions.agents = request.agents;
 
     const query = facade.query(queryOptions);
 
