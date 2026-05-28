@@ -279,3 +279,287 @@ describe("CodexAdapter", () => {
     await expect(adapter.resolvePermission("run_1", "perm_1", { decision: "allow", scope: "once" })).resolves.not.toThrow();
   });
 });
+
+import { ClaudeAdapter } from "../../src/adapters/providers/claude/claudeAdapter.js";
+import type { ClaudeSdkFacade, QueryInstance, QueryOptions } from "../../src/adapters/providers/claude/claudeClient.js";
+import type { ProviderEventSink } from "../../src/domain/events.js";
+
+function createFakeQueryInstance(): QueryInstance {
+  return {
+    close: vi.fn().mockResolvedValue(undefined),
+    interrupt: vi.fn().mockResolvedValue(undefined),
+    initializationResult: Promise.resolve({ status: "initialized" }),
+    supportedCommands: Promise.resolve(["help", "status"]),
+    supportedModels: Promise.resolve(["claude-sonnet-4", "claude-haiku-4"]),
+    supportedAgents: Promise.resolve(["default"]),
+    accountInfo: Promise.resolve({ user: "test" }),
+    rewindFiles: vi.fn().mockResolvedValue(undefined),
+    setPermissionMode: vi.fn().mockResolvedValue(undefined),
+    setModel: vi.fn().mockResolvedValue(undefined),
+    setMaxThinkingTokens: vi.fn().mockResolvedValue(undefined),
+    mcpServerStatus: Promise.resolve({ servers: [] }),
+    reconnectMcpServer: vi.fn().mockResolvedValue(undefined),
+    toggleMcpServer: vi.fn().mockResolvedValue(undefined),
+    setMcpServers: vi.fn().mockResolvedValue(undefined),
+    streamInput: vi.fn().mockResolvedValue(undefined),
+    stopTask: vi.fn().mockResolvedValue(undefined),
+  };
+}
+
+function createFakeClaudeFacade(): ClaudeSdkFacade & { _queryInstance: QueryInstance } {
+  const queryInstance = createFakeQueryInstance();
+  const facade: ClaudeSdkFacade = {
+    query: vi.fn().mockReturnValue(queryInstance),
+    tool: { create: vi.fn().mockResolvedValue({}) } as unknown as ClaudeSdkFacade["tool"],
+    createSdkMcpServer: vi.fn().mockResolvedValue({ name: "test-mcp" }),
+    listSessions: vi.fn().mockResolvedValue([{ id: "session_1" }]),
+    getSessionMessages: vi.fn().mockResolvedValue([{ id: "msg_1" }]),
+    getSessionInfo: vi.fn().mockResolvedValue({ id: "session_1" }),
+    renameSession: vi.fn().mockResolvedValue(undefined),
+    tagSession: vi.fn().mockResolvedValue(undefined),
+  };
+  return Object.assign(facade, { _queryInstance: queryInstance });
+}
+
+function createClaudeFakeSink(): ProviderEventSink {
+  return { emit: vi.fn().mockResolvedValue(undefined) };
+}
+
+function createClaudeAdapter(options: Partial<ConstructorParameters<typeof ClaudeAdapter>[0]> = {}): ClaudeAdapter {
+  const facade = createFakeClaudeFacade();
+  return new ClaudeAdapter({
+    facade,
+    eventBus: undefined as any,
+    runRegistry: undefined as any,
+    permissionService: undefined as any,
+    detectCli: async () => ({ available: true, path: "/usr/local/bin/claude" }),
+    ...options,
+  });
+}
+
+describe("ClaudeAdapter", () => {
+  it("getCapabilities() includes every Claude action ID", () => {
+    const adapter = createClaudeAdapter();
+    const caps = adapter.getCapabilities();
+    expect(caps).toBeDefined();
+    expect(caps.maxConcurrency).toBeGreaterThan(0);
+    const actionIds = adapter.listActions().map((a) => a.id);
+    expect(actionIds).toEqual(claudeActions.map((a) => a.id));
+  });
+
+  it("startRun calls facade.query", async () => {
+    const facade = createFakeClaudeFacade();
+    const adapter = createClaudeAdapter({ facade });
+    const request: AgentRunRequest = { id: "run_1", createdAt: "now", provider: "claude", prompt: "hello" };
+    await adapter.startRun(request);
+    expect(facade.query).toHaveBeenCalledWith(
+      expect.objectContaining({ prompt: "hello" })
+    );
+  });
+
+  it("query.run calls facade.query via run scope", async () => {
+    const facade = createFakeClaudeFacade();
+    const adapter = createClaudeAdapter({ facade });
+    const request: AgentRunRequest = { id: "run_qr", createdAt: "now", provider: "claude", prompt: "initial" };
+    await adapter.startRun(request);
+    const result = await adapter.executeRunAction({ runId: "run_qr", actionId: "query.run", input: { prompt: "hello" } });
+    expect(facade.query).toHaveBeenCalled();
+    expect(result.actionId).toBe("query.run");
+  });
+
+  it("query.run creates a new query via facade.query", async () => {
+    const facade = createFakeClaudeFacade();
+    const adapter = createClaudeAdapter({ facade });
+    const request: AgentRunRequest = { id: "run_sink", createdAt: "now", provider: "claude", prompt: "initial" };
+    await adapter.startRun(request);
+    const prevCalls = (facade.query as ReturnType<typeof vi.fn>).mock.calls.length;
+    await adapter.executeRunAction({ runId: "run_sink", actionId: "query.run", input: { prompt: "follow-up" } });
+    expect(facade.query).toHaveBeenCalledTimes(prevCalls + 1);
+  });
+
+  it("maps includePartialMessages to query options", async () => {
+    const facade = createFakeClaudeFacade();
+    const adapter = createClaudeAdapter({ facade });
+    const request: AgentRunRequest = { id: "run_1", createdAt: "now", provider: "claude", prompt: "hello" };
+    await adapter.startRun(request);
+    expect(facade.query).toHaveBeenCalled();
+  });
+
+  it("maps permissionMode normal to canUseTool with daemon permission requests", async () => {
+    const facade = createFakeClaudeFacade();
+    const adapter = createClaudeAdapter({ facade, permissionService: { requestPermission: vi.fn().mockResolvedValue({ decision: "allow", scope: "once" }) } as any });
+    const request: AgentRunRequest = { id: "run_1", createdAt: "now", provider: "claude", prompt: "hello", permissionMode: "normal" };
+    await adapter.startRun(request);
+    expect(facade.query).toHaveBeenCalledWith(
+      expect.objectContaining({ permissionMode: "normal" })
+    );
+  });
+
+  it("maps permissionMode yolo to bypassPermissions", async () => {
+    const facade = createFakeClaudeFacade();
+    const adapter = createClaudeAdapter({ facade });
+    const request: AgentRunRequest = { id: "run_1", createdAt: "now", provider: "claude", prompt: "go wild", permissionMode: "yolo" };
+    await adapter.startRun(request);
+    expect(facade.query).toHaveBeenCalledWith(
+      expect.objectContaining({ permissionMode: "yolo" })
+    );
+  });
+
+  it("run-bound query actions call active Query methods", async () => {
+    const facade = createFakeClaudeFacade();
+    const adapter = createClaudeAdapter({ facade });
+    const request: AgentRunRequest = { id: "run_1", createdAt: "now", provider: "claude", prompt: "hello" };
+    await adapter.startRun(request);
+
+    const queryInstance = facade._queryInstance;
+    const results = await Promise.all([
+      adapter.executeRunAction({ runId: "run_1", actionId: "query.interrupt", input: {} }),
+      adapter.executeRunAction({ runId: "run_1", actionId: "query.close", input: {} }),
+      adapter.executeRunAction({ runId: "run_1", actionId: "query.rewindFiles", input: {} }),
+      adapter.executeRunAction({ runId: "run_1", actionId: "query.setPermissionMode", input: { mode: "yolo" } }),
+      adapter.executeRunAction({ runId: "run_1", actionId: "query.setModel", input: { model: "claude-sonnet-4" } }),
+      adapter.executeRunAction({ runId: "run_1", actionId: "query.setMaxThinkingTokens", input: { tokens: 10000 } }),
+      adapter.executeRunAction({ runId: "run_1", actionId: "query.reconnectMcpServer", input: { name: "filesystem" } }),
+      adapter.executeRunAction({ runId: "run_1", actionId: "query.toggleMcpServer", input: { name: "filesystem", enabled: true } }),
+      adapter.executeRunAction({ runId: "run_1", actionId: "query.setMcpServers", input: { servers: [] } }),
+      adapter.executeRunAction({ runId: "run_1", actionId: "query.streamInput", input: { input: "more" } }),
+      adapter.executeRunAction({ runId: "run_1", actionId: "query.stopTask", input: {} }),
+    ]);
+    expect(results.every((r) => r.actionId.startsWith("query."))).toBe(true);
+    expect(queryInstance.interrupt).toHaveBeenCalled();
+    expect(queryInstance.close).toHaveBeenCalled();
+    expect(queryInstance.rewindFiles).toHaveBeenCalled();
+    expect(queryInstance.setPermissionMode).toHaveBeenCalledWith("yolo");
+    expect(queryInstance.setModel).toHaveBeenCalledWith("claude-sonnet-4");
+    expect(queryInstance.setMaxThinkingTokens).toHaveBeenCalledWith(10000);
+    expect(queryInstance.reconnectMcpServer).toHaveBeenCalledWith("filesystem");
+    expect(queryInstance.toggleMcpServer).toHaveBeenCalledWith("filesystem", true);
+    expect(queryInstance.setMcpServers).toHaveBeenCalledWith([]);
+    expect(queryInstance.streamInput).toHaveBeenCalledWith("more");
+    expect(queryInstance.stopTask).toHaveBeenCalled();
+  });
+
+  it("run-bound query property reads return values", async () => {
+    const facade = createFakeClaudeFacade();
+    const adapter = createClaudeAdapter({ facade });
+    const request: AgentRunRequest = { id: "run_1", createdAt: "now", provider: "claude", prompt: "hello" };
+    await adapter.startRun(request);
+
+    const initResult = await adapter.executeRunAction({ runId: "run_1", actionId: "query.initializationResult", input: {} });
+    expect(initResult.actionId).toBe("query.initializationResult");
+    expect(initResult.output).toBeDefined();
+
+    const commands = await adapter.executeRunAction({ runId: "run_1", actionId: "query.supportedCommands", input: {} });
+    expect(commands.actionId).toBe("query.supportedCommands");
+    expect(commands.output).toEqual(["help", "status"]);
+
+    const models = await adapter.executeRunAction({ runId: "run_1", actionId: "query.supportedModels", input: {} });
+    expect(models.actionId).toBe("query.supportedModels");
+    expect(models.output).toContain("claude-sonnet-4");
+
+    const agents = await adapter.executeRunAction({ runId: "run_1", actionId: "query.supportedAgents", input: {} });
+    expect(agents.actionId).toBe("query.supportedAgents");
+    expect(agents.output).toContain("default");
+
+    const account = await adapter.executeRunAction({ runId: "run_1", actionId: "query.accountInfo", input: {} });
+    expect(account.actionId).toBe("query.accountInfo");
+
+    const mcpStatus = await adapter.executeRunAction({ runId: "run_1", actionId: "query.mcpServerStatus", input: {} });
+    expect(mcpStatus.actionId).toBe("query.mcpServerStatus");
+  });
+
+  it("provider-level session actions call matching SDK functions", async () => {
+    const facade = createFakeClaudeFacade();
+    const adapter = createClaudeAdapter({ facade });
+
+    const toolResult = await adapter.executeProviderAction({ actionId: "tool.create", input: { name: "test" } });
+    expect(facade.tool.create).toHaveBeenCalled();
+    expect(toolResult.actionId).toBe("tool.create");
+
+    const mcpResult = await adapter.executeProviderAction({ actionId: "mcp.createSdkMcpServer", input: { name: "test" } });
+    expect(facade.createSdkMcpServer).toHaveBeenCalled();
+    expect(mcpResult.actionId).toBe("mcp.createSdkMcpServer");
+
+    const listResult = await adapter.executeProviderAction({ actionId: "sessions.list", input: {} });
+    expect(facade.listSessions).toHaveBeenCalled();
+    expect(listResult.actionId).toBe("sessions.list");
+
+    const msgsResult = await adapter.executeProviderAction({ actionId: "sessions.messages", input: { sessionId: "s1" } });
+    expect(facade.getSessionMessages).toHaveBeenCalled();
+    expect(msgsResult.actionId).toBe("sessions.messages");
+
+    const infoResult = await adapter.executeProviderAction({ actionId: "sessions.info", input: { sessionId: "s1" } });
+    expect(facade.getSessionInfo).toHaveBeenCalled();
+    expect(infoResult.actionId).toBe("sessions.info");
+
+    const renameResult = await adapter.executeProviderAction({ actionId: "sessions.rename", input: { sessionId: "s1", name: "new" } });
+    expect(facade.renameSession).toHaveBeenCalled();
+    expect(renameResult.actionId).toBe("sessions.rename");
+
+    const tagResult = await adapter.executeProviderAction({ actionId: "sessions.tag", input: { sessionId: "s1", tags: ["important"] } });
+    expect(facade.tagSession).toHaveBeenCalled();
+    expect(tagResult.actionId).toBe("sessions.tag");
+  });
+
+  it("getAuthStatus() reports Claude Code local auth when claude is present", async () => {
+    const adapter = createClaudeAdapter({ detectCli: async () => ({ available: true, path: "/usr/local/bin/claude" }) });
+    const status = await adapter.getAuthStatus();
+    expect(status.available).toBe(true);
+    expect(status.source).toBe("cli");
+  });
+
+  it("authMode: auto selects CLI auth on startRun", async () => {
+    const cli = vi.fn().mockResolvedValue({ available: true, path: "/usr/local/bin/claude" });
+    const facade = createFakeClaudeFacade();
+    const adapter = createClaudeAdapter({ facade, detectCli: cli });
+    const request: AgentRunRequest = { id: "run_1", createdAt: "now", provider: "claude", prompt: "hi", authMode: "auto" };
+    await adapter.startRun(request);
+    expect(cli).toHaveBeenCalled();
+  });
+
+  it("authMode: cli fails with provider.auth_required when claude CLI unavailable", async () => {
+    const adapter = createClaudeAdapter({ detectCli: async () => ({ available: false, path: null }) });
+    const request: AgentRunRequest = { id: "run_1", createdAt: "now", provider: "claude", prompt: "hi", authMode: "cli" };
+    await expect(adapter.startRun(request)).rejects.toThrow(providerFailure("CLI auth required but claude CLI not found", "claude"));
+  });
+
+  it("authMode: sdk skips CLI detection on startRun", async () => {
+    const cli = vi.fn();
+    const facade = createFakeClaudeFacade();
+    const adapter = createClaudeAdapter({ facade, detectCli: cli });
+    const request: AgentRunRequest = { id: "run_1", createdAt: "now", provider: "claude", prompt: "hi", authMode: "sdk" };
+    await adapter.startRun(request);
+    expect(cli).not.toHaveBeenCalled();
+  });
+
+  it("startRun() creates an AgentRun with correct defaults", async () => {
+    const adapter = createClaudeAdapter();
+    const request: AgentRunRequest = { id: "run_1", createdAt: "2024-01-01T00:00:00Z", provider: "claude", prompt: "list files" };
+    const run = await adapter.startRun(request);
+    expect(run.id).toBe("run_1");
+    expect(run.provider).toBe("claude");
+    expect(run.status).toBe("running");
+  });
+
+  it("cancelRun() calls query.close and returns cancelled run", async () => {
+    const facade = createFakeClaudeFacade();
+    const adapter = createClaudeAdapter({ facade });
+    const request: AgentRunRequest = { id: "run_1", createdAt: "now", provider: "claude", prompt: "hello" };
+    await adapter.startRun(request);
+    const run = await adapter.cancelRun("run_1");
+    expect(run.status).toBe("cancelled");
+    expect(facade._queryInstance.close).toHaveBeenCalled();
+  });
+
+  it("resumeRun() returns a resumed run with running status", async () => {
+    const adapter = createClaudeAdapter();
+    const run = await adapter.resumeRun("run_1");
+    expect(run.id).toBe("run_1");
+    expect(run.status).toBe("running");
+  });
+
+  it("resolvePermission() does not throw", async () => {
+    const adapter = createClaudeAdapter();
+    await expect(adapter.resolvePermission("run_1", "perm_1", { decision: "allow", scope: "once" })).resolves.not.toThrow();
+  });
+});
