@@ -64,6 +64,46 @@ describe("opencodeNormalizer", () => {
     expect(events[0]!.type).toBe("message.delta");
   });
 
+  it("normalizes current OpenCode text part deltas to message.delta with text", () => {
+    const events = normalizeOpenCodeEvent(
+      makeInput({
+        type: "message.part.delta",
+        properties: {
+          field: "text",
+          delta: "OK",
+          partID: "prt_1",
+          messageID: "msg_1",
+          sessionID: "ses_1",
+        },
+      }),
+    );
+
+    expect(events).toHaveLength(1);
+    expect(events[0]!.type).toBe("message.delta");
+    expect(events[0]!.data.text).toBe("OK");
+    expect(events[0]!.data.delta).toBe("OK");
+  });
+
+  it("normalizes completed current OpenCode text parts to message.completed with text", () => {
+    const events = normalizeOpenCodeEvent(
+      makeInput({
+        type: "message.part.updated",
+        properties: {
+          part: {
+            type: "text",
+            text: "OK",
+            messageID: "msg_1",
+            sessionID: "ses_1",
+          },
+        },
+      }),
+    );
+
+    expect(events).toHaveLength(1);
+    expect(events[0]!.type).toBe("message.completed");
+    expect(events[0]!.data.text).toBe("OK");
+  });
+
   it("normalizes tool.start to tool.started", () => {
     const events = normalizeOpenCodeEvent(makeInput(toolStartEvent));
     expect(events.length).toBeGreaterThanOrEqual(1);

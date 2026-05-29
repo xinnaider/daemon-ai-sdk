@@ -2,7 +2,7 @@ import type { DaemonEvent } from "../../domain/events.js";
 import type { ServerResponse } from "node:http";
 
 export function encodeSseFrame(event: DaemonEvent): string {
-  const data = JSON.stringify(event.data);
+  const data = JSON.stringify(event);
   return [
     `id: ${event.id}`,
     `event: ${event.type}`,

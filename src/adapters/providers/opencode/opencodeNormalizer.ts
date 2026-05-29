@@ -6,6 +6,14 @@ import { createNormalizedEvent, createNormalizedEvents } from "../../../applicat
 export function normalizeOpenCodeEvent(input: NormalizeInput): DaemonEvent[] {
   const raw = input.raw as Record<string, unknown>;
   const eventType = (raw.type as string) ?? "";
+  const properties =
+    typeof raw.properties === "object" && raw.properties !== null
+      ? (raw.properties as Record<string, unknown>)
+      : {};
+  const part =
+    typeof properties.part === "object" && properties.part !== null
+      ? (properties.part as Record<string, unknown>)
+      : {};
 
   switch (eventType) {
     case "session.created":
@@ -26,6 +34,27 @@ export function normalizeOpenCodeEvent(input: NormalizeInput): DaemonEvent[] {
 
     case "part.text_delta":
       return [createNormalizedEvent(input, "message.delta")];
+
+    case "message.part.delta": {
+      const delta = typeof properties.delta === "string" ? properties.delta : "";
+      const field = typeof properties.field === "string" ? properties.field : "";
+      if (field === "text" && delta.length > 0) {
+        return [createNormalizedEvent(input, "message.delta", { text: delta, delta })];
+      }
+      return [createNormalizedEvent(input, "unknown")];
+    }
+
+    case "message.part.updated": {
+      const partType = typeof part.type === "string" ? part.type : "";
+      const text = typeof part.text === "string" ? part.text : "";
+      if (partType === "text" && text.length > 0) {
+        return [createNormalizedEvent(input, "message.completed", { role: "assistant", text })];
+      }
+      if (partType === "reasoning" && text.length > 0) {
+        return [createNormalizedEvent(input, "reasoning.completed", { text })];
+      }
+      return [createNormalizedEvent(input, "unknown")];
+    }
 
     case "tool.start":
       return [createNormalizedEvent(input, "tool.started")];

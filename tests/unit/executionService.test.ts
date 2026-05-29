@@ -104,6 +104,24 @@ describe("ExecutionService", () => {
       );
     });
 
+    it("assigns run id and createdAt when HTTP request omits them", async () => {
+      const deps = makeMockDeps();
+      const service = new ExecutionService(deps);
+      const request = makeRunRequest({ id: "", createdAt: "" });
+      deps.mockProvider.startRun.mockImplementation(async (input: AgentRunRequest) => createRun(input));
+
+      const run = await service.startRun(request);
+
+      expect(run.id).toBe("run_test123");
+      expect(run.createdAt).toBe("2025-01-01T00:00:00.000Z");
+      expect(deps.mockProvider.startRun).toHaveBeenCalledWith(
+        expect.objectContaining({
+          id: "run_test123",
+          createdAt: "2025-01-01T00:00:00.000Z",
+        }),
+      );
+    });
+
     it("calls provider startRun", async () => {
       const deps = makeMockDeps();
       const request = makeRunRequest();

@@ -93,6 +93,8 @@ describe("SSE Event Streams", () => {
     const text = decoder.decode(value, { stream: true });
     expect(text).toContain(e1.id);
     expect(text).toContain(e2.id);
+    expect(text).toContain("\"runId\":\"run_1\"");
+    expect(text).toContain("\"type\":\"message\"");
 
     controller.abort();
     await app.close();

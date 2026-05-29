@@ -33,34 +33,40 @@ export class ExecutionService {
   }
 
   async startRun(request: AgentRunRequest): Promise<AgentRun> {
+    const normalizedRequest: AgentRunRequest = {
+      ...request,
+      id: request.id || this.deps.createId("run"),
+      createdAt: request.createdAt || this.deps.now(),
+    };
+
     await this.deps.logger.log({
       id: this.deps.createId("log"),
       createdAt: this.deps.now(),
       level: "info",
       kind: "run.start" as LogEventKind,
       message: "Starting run",
-      data: { provider: request.provider, prompt: request.prompt },
+      data: { provider: normalizedRequest.provider, prompt: normalizedRequest.prompt },
     });
 
-    const run = createRun(request);
+    const run = createRun(normalizedRequest);
     this.deps.runs.addRun(run);
 
     const createdEvent: DaemonEvent = {
       id: this.deps.createId("evt"),
       runId: run.id,
-      provider: request.provider as ProviderId,
+      provider: normalizedRequest.provider as ProviderId,
       type: "run.created" as DaemonEvent["type"],
       createdAt: this.deps.now(),
       sequence: 0,
-      data: { runId: run.id, provider: request.provider },
+      data: { runId: run.id, provider: normalizedRequest.provider },
     };
     this.deps.events.publish(createdEvent);
 
-    const provider = this.deps.providers.get(request.provider);
+    const provider = this.deps.providers.get(normalizedRequest.provider);
 
-    const result = await provider.startRun(request);
+    const result = await provider.startRun(normalizedRequest);
 
-    this.deps.runs.setHandle(run.id, { provider: request.provider, native: {} });
+    this.deps.runs.setHandle(run.id, { provider: normalizedRequest.provider, native: {} });
 
     const terminalStatuses: RunStatus[] = ["completed", "failed", "cancelled"];
     if (terminalStatuses.includes(result.status)) {

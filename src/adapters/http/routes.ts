@@ -25,12 +25,12 @@ const createRunSchema = z.object({
 
 const providerActionSchema = z.object({
   actionId: z.string().min(1),
-  input: z.record(z.unknown()).default({}),
+  input: z.record(z.string(), z.unknown()).default({}),
 });
 
 const runActionSchema = z.object({
   actionId: z.string().min(1),
-  input: z.record(z.unknown()).default({}),
+  input: z.record(z.string(), z.unknown()).default({}),
 });
 
 const permissionSchema = z.object({
@@ -40,7 +40,7 @@ const permissionSchema = z.object({
 
 const resumeRunSchema = z.object({
   sessionId: z.string().optional(),
-  metadata: z.record(z.unknown()).optional(),
+  metadata: z.record(z.string(), z.unknown()).optional(),
 });
 
 export function registerRoutes(app: FastifyInstance, deps: ServerDeps): void {
