@@ -198,7 +198,7 @@ Create `package.json`:
 
 ```json
 {
-  "name": "orbit-agent-daemon",
+  "name": "agent-daemon",
   "version": "0.1.0",
   "private": true,
   "type": "module",

@@ -8,6 +8,7 @@ import type { RunRegistry } from "./runRegistry.js";
 import type { PermissionService } from "./permissionService.js";
 import type { EventBus } from "./eventBus.js";
 import type { EventLogger } from "../ports/eventLogger.js";
+import type { LogEventKind } from "../domain/logging.js";
 
 export interface ProviderResumeInput {
   sessionId?: string;
@@ -36,7 +37,7 @@ export class ExecutionService {
       id: this.deps.createId("log"),
       createdAt: this.deps.now(),
       level: "info",
-      kind: "run.start",
+      kind: "run.start" as LogEventKind,
       message: "Starting run",
       data: { provider: request.provider, prompt: request.prompt },
     });

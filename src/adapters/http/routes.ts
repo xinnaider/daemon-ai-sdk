@@ -1,6 +1,7 @@
 import type { FastifyInstance, FastifyRequest, FastifyReply } from "fastify";
 import { z } from "zod";
-import type { ExecutionService } from "../../application/executionService.js";
+import type { ExecutionService, ProviderResumeInput } from "../../application/executionService.js";
+import type { AgentRunRequest } from "../../domain/runs.js";
 import type { ProviderRegistry } from "../providers/common/providerRegistry.js";
 import type { RunRegistry } from "../../application/runRegistry.js";
 import type { EventBus } from "../../application/eventBus.js";
@@ -87,11 +88,14 @@ export function registerRoutes(app: FastifyInstance, deps: ServerDeps): void {
     if (!parsed.success) {
       return reply.status(400).send({ error: "Invalid request body", details: parsed.error.issues });
     }
-    const runRequest = {
+    const runRequest: AgentRunRequest = {
       id: "",
       createdAt: "",
-      ...parsed.data,
+      provider: parsed.data.provider,
+      prompt: parsed.data.prompt,
     };
+    if (parsed.data.authMode !== undefined) runRequest.authMode = parsed.data.authMode;
+    if (parsed.data.permissionMode !== undefined) runRequest.permissionMode = parsed.data.permissionMode;
     const run = await deps.execution.startRun(runRequest);
     return reply.status(201).send(run);
   });
@@ -136,7 +140,10 @@ export function registerRoutes(app: FastifyInstance, deps: ServerDeps): void {
       return reply.status(400).send({ error: "Invalid request body", details: parsed.error.issues });
     }
     try {
-      const run = await deps.execution.resumeRun(req.params.runId, parsed.data);
+      const resumeInput: ProviderResumeInput = {};
+      if (parsed.data.sessionId !== undefined) resumeInput.sessionId = parsed.data.sessionId;
+      if (parsed.data.metadata !== undefined) resumeInput.metadata = parsed.data.metadata;
+      const run = await deps.execution.resumeRun(req.params.runId, resumeInput);
       return run;
     } catch {
       return reply.status(404).send({ error: `Run not found: ${req.params.runId}` });
@@ -155,11 +162,11 @@ export function registerRoutes(app: FastifyInstance, deps: ServerDeps): void {
     return result;
   });
 
-  app.get("/runs/:runId/events", async (req, reply) => {
+  app.get<{ Params: { runId: string } }>("/runs/:runId/events", async (req, reply) => {
     const raw = reply.raw;
     writeSseHeaders(raw);
 
-    const runId = (req.params as Record<string, string>).runId;
+    const runId = req.params.runId;
     const prior = deps.events.replay(runId);
     for (const event of prior) {
       sendSseEvent(raw, event);

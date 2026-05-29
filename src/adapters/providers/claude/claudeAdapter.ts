@@ -3,7 +3,7 @@ import type { ProviderCapabilities, SdkActionDescriptor, SdkActionResult, Provid
 import type { ProviderAuthStatus, AuthMode } from "../../../domain/auth.js";
 import type { AgentRun, AgentRunRequest } from "../../../domain/runs.js";
 import type { PermissionResolution } from "../../../domain/permissions.js";
-import type { ProviderEventSink } from "../../../domain/events.js";
+import type { DaemonEvent, ProviderEventSink } from "../../../domain/events.js";
 import type { EventBus } from "../../../application/eventBus.js";
 import type { RunRegistry } from "../../../application/runRegistry.js";
 import type { PermissionService } from "../../../application/permissionService.js";
@@ -12,6 +12,8 @@ import { claudeActions } from "./actions.js";
 import type { ClaudeSdkFacade, QueryInstance, QueryOptions } from "./claudeClient.js";
 import { detectCli } from "../../../infrastructure/cli.js";
 import { nowIso } from "../../../infrastructure/time.js";
+import { createId } from "../../../infrastructure/ids.js";
+import { ensureClaudeSdkLoaded } from "./claudeClient.js";
 import { normalizeClaudeMessage } from "./claudeNormalizer.js";
 
 export interface ClaudeAdapterOptions {
@@ -224,20 +226,42 @@ export class ClaudeAdapter implements AgentProvider {
       }
     }
 
+    await ensureClaudeSdkLoaded();
     const facade = this.getFacade();
     const controller = new AbortController();
     const permissionMode = request.permissionMode ?? "normal";
 
-    let canUseTool: ((toolName: string, toolInput: unknown) => Promise<{ decision: "allow" | "deny"; scope: "once" | "always" | "until_reply" }>) | undefined;
+    let canUseTool: QueryOptions["canUseTool"];
 
     if (permissionMode === "normal" && this.options.permissionService) {
       canUseTool = async (toolName: string, toolInput: unknown) => {
-        const resolution = await this.options.permissionService!.requestPermission({
+        const permissionId = createId("perm");
+        const toolRecord =
+          typeof toolInput === "object" && toolInput !== null
+            ? (toolInput as Record<string, unknown>)
+            : { value: toolInput };
+        const pending = this.options.permissionService!.createPending({
+          permissionId,
           runId: request.id,
-          action: toolName,
-          resource: JSON.stringify(toolInput),
-          context: {},
+          provider: "claude",
+          toolName,
+          toolInput: toolRecord,
+          createdAt: nowIso(),
         });
+
+        if (this.options.eventBus) {
+          this.options.eventBus.publish({
+            id: createId("evt"),
+            runId: request.id,
+            provider: "claude",
+            type: "permission.requested" as DaemonEvent["type"],
+            createdAt: nowIso(),
+            sequence: 0,
+            data: { permissionId, toolName, toolInput: toolRecord },
+          });
+        }
+
+        const resolution = await pending.promise;
         return { decision: resolution.decision, scope: resolution.scope };
       };
     }
@@ -246,8 +270,8 @@ export class ClaudeAdapter implements AgentProvider {
       prompt: request.prompt,
       signal: controller.signal,
       permissionMode,
-      canUseTool,
       includePartialMessages: true,
+      ...(canUseTool ? { canUseTool } : {}),
     };
 
     if (request.cwd) queryOptions.cwd = request.cwd;

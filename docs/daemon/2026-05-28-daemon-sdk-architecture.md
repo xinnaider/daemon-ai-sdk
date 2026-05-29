@@ -11,7 +11,7 @@ The first implementation will ship the core functional path first: create runs, 
 
 ## Non-Goals
 
-- Do not connect directly to Orbit in the first delivery.
+- Do not embed a desktop host, IPC bridge, or client-specific UI in the first delivery.
 - Do not persist runs to a database in the first delivery.
 - Do not hide provider-specific data behind lossy abstractions.
 - Do not build a UI.
@@ -20,7 +20,6 @@ The first implementation will ship the core functional path first: create runs, 
 
 ## References
 
-- Orbit project: `C:/Users/fernandonepen/Documents/orbit`
 - Paseo: https://github.com/getpaseo/paseo
 - OpenCode SDK: https://opencode.ai/docs/sdk/
 - OpenCode permissions: https://opencode.ai/docs/permissions/
@@ -55,7 +54,7 @@ The first implementation will ship the core functional path first: create runs, 
    - errors and cancellation.
 5. The first logger implementation writes to console and an in-memory log buffer.
 6. The daemon always emits `provider.raw` before or alongside normalized events, so unknown or newly introduced SDK events are not lost.
-7. Provider-specific features are exposed as capabilities and provider options, not as hard-coded Orbit concepts.
+7. Provider-specific features are exposed as capabilities and provider options, not as hard-coded client/UI concepts.
 8. Permission handling uses a common daemon protocol:
    - `permissionMode: "normal"` emits `permission.requested` and waits for HTTP resolution when the SDK supports interactive permission callbacks;
    - `permissionMode: "yolo"` maps to each provider's bypass or allow-all behavior when supported;
@@ -886,18 +885,18 @@ Each implementation phase must update documentation before the phase is consider
 - `POST /runs/:runId/cancel` cancels or aborts active runs where supported.
 - Tests cover HTTP, SSE, event normalization, logging, permissions, and provider adapters.
 - Tests cover SDK action dispatch for every provider action registered by the adapters.
-- Docs explain how to run, configure SDK env vars, test HTTP, test SSE, understand adapters, and integrate Orbit later.
+- Docs explain how to run, configure SDK env vars, test HTTP, test SSE, understand adapters, and integrate external clients later.
 
-## Future Orbit Integration
+## Future Client Integration
 
-Orbit or any other client can consume:
+Any HTTP/SSE client can consume:
 
 - `POST /runs` to start work;
 - `GET /runs/:runId/events` for per-session stream;
 - `POST /runs/:runId/permissions/:permissionId` for approval UI;
 - `GET /providers` for provider/model/capability discovery.
 
-No Orbit-specific IPC, Tauri state, or Rust model should be introduced in this daemon.
+No host-specific IPC, embedded UI state, or non-HTTP coupling should be introduced in this daemon.
 
 ## Spec Review
 
