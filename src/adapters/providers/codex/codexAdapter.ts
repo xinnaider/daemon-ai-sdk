@@ -26,6 +26,7 @@ export interface CodexAdapterOptions {
 export class CodexAdapter implements AgentProvider {
   private options: CodexAdapterOptions;
   private activeAbortControllers = new Map<string, AbortController>();
+  private sdkClient: CodexSdkClient | null = null;
 
   constructor(options: CodexAdapterOptions) {
     this.options = options;
@@ -63,7 +64,7 @@ export class CodexAdapter implements AgentProvider {
       throw providerFailure(`Action '${request.actionId}' is not a provider-scope action`, "codex");
     }
 
-    const sdk = this.getSdkClient();
+    const sdk = await this.getSdkClient();
     const start = Date.now();
     let output: unknown;
 
@@ -87,7 +88,7 @@ export class CodexAdapter implements AgentProvider {
       throw providerFailure(`Action '${request.actionId}' is not a run-scope action`, "codex");
     }
 
-    const sdk = this.getSdkClient();
+    const sdk = await this.getSdkClient();
     const start = Date.now();
     let output: unknown;
 
@@ -161,7 +162,7 @@ export class CodexAdapter implements AgentProvider {
       }
     }
 
-    const sdk = this.getSdkClient();
+    const sdk = await this.getSdkClient();
     const controller = new AbortController();
     this.activeAbortControllers.set(request.id, controller);
 
@@ -206,7 +207,7 @@ export class CodexAdapter implements AgentProvider {
   }
 
   async resumeRun(runId: string): Promise<AgentRun> {
-    const sdk = this.getSdkClient();
+    const sdk = await this.getSdkClient();
     const result = await sdk.resumeThread({ threadId: runId });
 
     const threadData = result as Record<string, unknown>;
@@ -246,8 +247,11 @@ export class CodexAdapter implements AgentProvider {
     return;
   }
 
-  private getSdkClient(): CodexSdkClient {
-    return this.options.sdkFactory({});
+  private async getSdkClient(): Promise<CodexSdkClient> {
+    if (!this.sdkClient) {
+      this.sdkClient = await this.options.sdkFactory({});
+    }
+    return this.sdkClient;
   }
 }
 

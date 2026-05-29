@@ -97,11 +97,12 @@ runSuite("Real SDK Smoke Tests", () => {
 
   it("Event streaming - EventBus publishes and replays events", async () => {
     const testEvent = {
+      id: "evt_smoke_1",
       type: "smoke.test" as const,
       provider: "opencode" as const,
       runId: "smoke_event_test",
+      createdAt: new Date().toISOString(),
       data: { msg: "hello" },
-      timestamp: new Date().toISOString(),
       sequence: 1,
     };
 
@@ -109,7 +110,9 @@ runSuite("Real SDK Smoke Tests", () => {
 
     const replayed = runtime.events.replay("smoke_event_test");
     expect(replayed.length).toBeGreaterThanOrEqual(1);
-    expect(replayed[replayed.length - 1].type).toBe("smoke.test");
+    const last = replayed[replayed.length - 1];
+    expect(last).toBeDefined();
+    expect(last!.type).toBe("smoke.test");
   });
 
   it("Error handling - unknown provider returns 404", async () => {

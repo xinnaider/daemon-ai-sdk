@@ -113,7 +113,7 @@ function createFakeSdkClient(): CodexSdkClient {
 
 function createFakeSdkFactory(): CodexSdkFactory {
   const client = createFakeSdkClient();
-  const factory = vi.fn().mockReturnValue(client);
+  const factory = vi.fn().mockResolvedValue(client);
   return Object.assign(factory, { _client: client });
 }
 
@@ -145,7 +145,7 @@ describe("CodexAdapter", () => {
 
   it("thread.start calls codex.startThread", async () => {
     const client = createFakeSdkClient();
-    const factory: CodexSdkFactory = Object.assign(vi.fn().mockReturnValue(client), { _client: client });
+    const factory: CodexSdkFactory = Object.assign(vi.fn().mockResolvedValue(client), { _client: client });
     const adapter = createAdapter({ sdkFactory: factory });
     const result = await adapter.executeProviderAction({ actionId: "thread.start", input: { prompt: "hello" } });
     expect(client.startThread).toHaveBeenCalled();
@@ -155,7 +155,7 @@ describe("CodexAdapter", () => {
 
   it("thread.resume calls codex.resumeThread", async () => {
     const client = createFakeSdkClient();
-    const factory: CodexSdkFactory = Object.assign(vi.fn().mockReturnValue(client), { _client: client });
+    const factory: CodexSdkFactory = Object.assign(vi.fn().mockResolvedValue(client), { _client: client });
     const adapter = createAdapter({ sdkFactory: factory });
     const result = await adapter.executeRunAction({ runId: "run_1", actionId: "thread.resume", input: { threadId: "thread_1" } });
     expect(client.resumeThread).toHaveBeenCalled();
@@ -164,7 +164,7 @@ describe("CodexAdapter", () => {
 
   it("thread.run calls buffered thread.run", async () => {
     const client = createFakeSdkClient();
-    const factory: CodexSdkFactory = Object.assign(vi.fn().mockReturnValue(client), { _client: client });
+    const factory: CodexSdkFactory = Object.assign(vi.fn().mockResolvedValue(client), { _client: client });
     const adapter = createAdapter({ sdkFactory: factory });
     const result = await adapter.executeRunAction({ runId: "run_1", actionId: "thread.run", input: { threadId: "thread_1" } });
     expect(client.run).toHaveBeenCalled();
@@ -179,7 +179,7 @@ describe("CodexAdapter", () => {
         yield evt;
       }
     });
-    const factory: CodexSdkFactory = Object.assign(vi.fn().mockReturnValue(client), { _client: client });
+    const factory: CodexSdkFactory = Object.assign(vi.fn().mockResolvedValue(client), { _client: client });
     const sink = createFakeSink();
     const adapter = createAdapter({ sdkFactory: factory });
     await adapter.executeRunAction({ runId: "run_1", actionId: "thread.runStreamed", input: { threadId: "thread_1", sink } });
@@ -201,7 +201,7 @@ describe("CodexAdapter", () => {
   it("authMode: auto tries CLI first, falls back to SDK on startRun", async () => {
     const cli = vi.fn().mockResolvedValue({ available: true, path: "/usr/local/bin/codex" });
     const sdkClient = createFakeSdkClient();
-    const factory: CodexSdkFactory = Object.assign(vi.fn().mockReturnValue(sdkClient), { _client: sdkClient });
+    const factory: CodexSdkFactory = Object.assign(vi.fn().mockResolvedValue(sdkClient), { _client: sdkClient });
     const adapter = createAdapter({ sdkFactory: factory, detectCli: cli });
     const request: AgentRunRequest = { id: "run_1", createdAt: "now", provider: "codex", prompt: "hi", authMode: "auto" };
     await adapter.startRun(request);
@@ -217,7 +217,7 @@ describe("CodexAdapter", () => {
   it("authMode: sdk skips CLI detection and uses SDK only on startRun", async () => {
     const cli = vi.fn();
     const sdkClient = createFakeSdkClient();
-    const factory: CodexSdkFactory = Object.assign(vi.fn().mockReturnValue(sdkClient), { _client: sdkClient });
+    const factory: CodexSdkFactory = Object.assign(vi.fn().mockResolvedValue(sdkClient), { _client: sdkClient });
     const adapter = createAdapter({ sdkFactory: factory, detectCli: cli });
     const request: AgentRunRequest = { id: "run_1", createdAt: "now", provider: "codex", prompt: "hi", authMode: "sdk" };
     await adapter.startRun(request);
@@ -240,7 +240,7 @@ describe("CodexAdapter", () => {
 
   it("startRun() maps permissionMode normal to approvalPolicy on-request", async () => {
     const client = createFakeSdkClient();
-    const factory: CodexSdkFactory = Object.assign(vi.fn().mockReturnValue(client), { _client: client });
+    const factory: CodexSdkFactory = Object.assign(vi.fn().mockResolvedValue(client), { _client: client });
     const adapter = createAdapter({ sdkFactory: factory });
     const request: AgentRunRequest = {
       id: "run_2", createdAt: "2024-01-01T00:00:00Z", provider: "codex", prompt: "hello", permissionMode: "normal",
@@ -253,7 +253,7 @@ describe("CodexAdapter", () => {
 
   it("startRun() maps permissionMode yolo to approvalPolicy never and danger sandbox", async () => {
     const client = createFakeSdkClient();
-    const factory: CodexSdkFactory = Object.assign(vi.fn().mockReturnValue(client), { _client: client });
+    const factory: CodexSdkFactory = Object.assign(vi.fn().mockResolvedValue(client), { _client: client });
     const adapter = createAdapter({ sdkFactory: factory });
     const request: AgentRunRequest = {
       id: "run_3", createdAt: "2024-01-01T00:00:00Z", provider: "codex", prompt: "go wild", permissionMode: "yolo",
@@ -266,7 +266,7 @@ describe("CodexAdapter", () => {
 
   it("resumeRun() resumes an existing thread", async () => {
     const client = createFakeSdkClient();
-    const factory: CodexSdkFactory = Object.assign(vi.fn().mockReturnValue(client), { _client: client });
+    const factory: CodexSdkFactory = Object.assign(vi.fn().mockResolvedValue(client), { _client: client });
     const adapter = createAdapter({ sdkFactory: factory });
     const run = await adapter.resumeRun("run_1");
     expect(run.id).toBe("run_1");
@@ -621,7 +621,6 @@ function createFakeOpenCodeSdkClient(): OpenCodeSdkClient {
       showToast: vi.fn().mockResolvedValue(undefined),
     },
     event: { subscribe: vi.fn().mockResolvedValue(unsubscribe) },
-    _unsubscribe: unsubscribe,
   };
 }
 

@@ -1,12 +1,13 @@
+import { fileURLToPath } from "node:url";
 import { createServer } from "./adapters/http/server.js";
 import type { ServerDeps } from "./adapters/http/routes.js";
 import { ProviderRegistry } from "./adapters/providers/common/providerRegistry.js";
 import type { OpenCodeSdkFactory } from "./adapters/providers/opencode/opencodeClient.js";
-import type { ClaudeSdkFacade } from "./adapters/providers/claude/claudeClient.js";
 import type { CodexSdkFactory } from "./adapters/providers/codex/codexClient.js";
 import { OpenCodeAdapter } from "./adapters/providers/opencode/opencodeAdapter.js";
 import { ClaudeAdapter } from "./adapters/providers/claude/claudeAdapter.js";
 import { CodexAdapter } from "./adapters/providers/codex/codexAdapter.js";
+import { createRealClaudeFacade, ensureClaudeSdkLoaded } from "./adapters/providers/claude/claudeClient.js";
 import { MemoryEventLogger } from "./adapters/logging/memoryEventLogger.js";
 import { EventBus } from "./application/eventBus.js";
 import { RunRegistry } from "./application/runRegistry.js";
@@ -40,7 +41,7 @@ export function buildDaemon(overrides?: Partial<DaemonDeps>): DaemonRuntime {
   const providers = new ProviderRegistry();
   const runs = new RunRegistry();
   const permissions = new PermissionService();
-  const events = new EventBus({ bufferSize: 1000 });
+  const events = new EventBus({ bufferSize: config.eventBufferSize });
   const logger = new MemoryEventLogger({ maxEntries: 1000, echoToConsole: false });
 
   const execution = new ExecutionService({
@@ -57,25 +58,11 @@ export function buildDaemon(overrides?: Partial<DaemonDeps>): DaemonRuntime {
     const { createRealOpenCodeFactory } = await import("./adapters/providers/opencode/opencodeClient.js");
     return createRealOpenCodeFactory()(opts);
   };
-  const claudeFacade: ClaudeSdkFacade = (() => {
-    let facade: ClaudeSdkFacade | null = null;
-    const proxy: ClaudeSdkFacade = {
-      query: (options) => {
-        if (!facade) throw new Error("Claude SDK not available. Install @anthropic-ai/claude-agent-sdk.");
-        return facade.query(options);
-      },
-      tool: { create: async (i) => { throw new Error("Claude SDK not available"); } },
-      createSdkMcpServer: async (i) => { throw new Error("Claude SDK not available"); },
-      listSessions: async (i) => { throw new Error("Claude SDK not available"); },
-      getSessionMessages: async (i) => { throw new Error("Claude SDK not available"); },
-      getSessionInfo: async (i) => { throw new Error("Claude SDK not available"); },
-      renameSession: async (i) => { throw new Error("Claude SDK not available"); },
-      tagSession: async (i) => { throw new Error("Claude SDK not available"); },
-    };
-    return proxy;
-  })();
-  const codexSdkFactory: CodexSdkFactory = (opts) => {
-    const { createRealCodexFactory } = require("./adapters/providers/codex/codexClient.js") as { createRealCodexFactory: () => CodexSdkFactory };
+
+  const claudeFacade = createRealClaudeFacade();
+
+  const codexSdkFactory: CodexSdkFactory = async (opts) => {
+    const { createRealCodexFactory } = await import("./adapters/providers/codex/codexClient.js");
     return createRealCodexFactory()(opts);
   };
 
@@ -110,6 +97,30 @@ export function buildDaemon(overrides?: Partial<DaemonDeps>): DaemonRuntime {
 
 export async function startDaemon(): Promise<void> {
   const config = loadConfig();
-  const runtime = buildDaemon();
+  const runtime = buildDaemon({ config });
+
+  await ensureClaudeSdkLoaded().catch((err) => {
+    console.warn(
+      `[daemon] Claude SDK unavailable: ${err instanceof Error ? err.message : String(err)}`
+    );
+  });
+
   await runtime.server.listen({ port: config.port, host: config.host });
+  console.log(`[daemon] listening on http://${config.host}:${config.port}`);
+
+  const shutdown = async (signal: string) => {
+    console.log(`[daemon] ${signal} received, shutting down`);
+    await runtime.server.close();
+    process.exit(0);
+  };
+
+  process.on("SIGINT", () => void shutdown("SIGINT"));
+  process.on("SIGTERM", () => void shutdown("SIGTERM"));
+}
+
+if (process.argv[1] === fileURLToPath(import.meta.url)) {
+  startDaemon().catch((err) => {
+    console.error("[daemon] failed to start:", err);
+    process.exit(1);
+  });
 }

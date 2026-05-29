@@ -16,6 +16,11 @@ export interface AgentRunRequest {
   prompt: string;
   authMode?: AuthMode;
   permissionMode?: PermissionMode;
+  cwd?: string;
+  model?: string;
+  maxTurns?: number;
+  mcpServers?: Record<string, unknown>;
+  agents?: unknown[];
 }
 
 export interface AgentRun {

@@ -48,8 +48,8 @@ export type OpenCodeSdkFactory = (options: OpenCodeFactoryOptions) => Promise<Op
 
 export function createRealOpenCodeFactory(): OpenCodeSdkFactory {
   return async (_options: OpenCodeFactoryOptions): Promise<OpenCodeSdkClient> => {
-    const { OpenCode } = await import("@opencode/sdk") as { OpenCode: new (opts: Record<string, unknown>) => OpenCodeSdkClient };
-    const sdk = new OpenCode({});
-    return sdk;
+    const { createOpencodeClient } = await import("@opencode-ai/sdk");
+    const sdk = await createOpencodeClient({});
+    return sdk as unknown as OpenCodeSdkClient;
   };
 }

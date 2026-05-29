@@ -1,8 +1,11 @@
 {
-  "name": "orbit-agent-daemon",
+  "name": "agent-daemon",
   "version": "0.1.0",
   "private": true,
   "type": "module",
+  "bin": {
+    "agent-daemon": "./dist/main.js"
+  },
   "scripts": {
     "dev": "tsx watch src/main.ts",
     "start": "node dist/main.js",

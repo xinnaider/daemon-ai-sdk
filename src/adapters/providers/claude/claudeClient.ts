@@ -46,8 +46,18 @@ export type QueryInstance = {
   [key: string]: unknown;
 };
 
-export function createRealClaudeFacade(): ClaudeSdkFacade {
-  const sdk = await_import();
+let cachedFacade: ClaudeSdkFacade | null = null;
+
+function wrapSdk(sdk: {
+  query: (options: QueryOptions) => QueryInstance;
+  tool: ClaudeSdkFacade["tool"];
+  createSdkMcpServer: ClaudeSdkFacade["createSdkMcpServer"];
+  listSessions: ClaudeSdkFacade["listSessions"];
+  getSessionMessages: ClaudeSdkFacade["getSessionMessages"];
+  getSessionInfo: ClaudeSdkFacade["getSessionInfo"];
+  renameSession: ClaudeSdkFacade["renameSession"];
+  tagSession: ClaudeSdkFacade["tagSession"];
+}): ClaudeSdkFacade {
   return {
     query: (options) => sdk.query(options),
     tool: sdk.tool,
@@ -60,8 +70,31 @@ export function createRealClaudeFacade(): ClaudeSdkFacade {
   };
 }
 
-function await_import() {
-  throw new Error(
-    "Claude SDK not bundled. Use createRealClaudeFacade() only at runtime with the @anthropic-ai/claude-agent-sdk package installed."
-  );
+export async function ensureClaudeSdkLoaded(): Promise<ClaudeSdkFacade> {
+  if (cachedFacade) return cachedFacade;
+  const sdk = await import("@anthropic-ai/claude-agent-sdk");
+  cachedFacade = wrapSdk(sdk as unknown as Parameters<typeof wrapSdk>[0]);
+  return cachedFacade;
+}
+
+export function createRealClaudeFacade(): ClaudeSdkFacade {
+  const requireLoaded = (): ClaudeSdkFacade => {
+    if (!cachedFacade) {
+      throw new Error("Claude SDK not loaded. Call ensureClaudeSdkLoaded() before using Claude.");
+    }
+    return cachedFacade;
+  };
+
+  return {
+    query: (options) => requireLoaded().query(options),
+    tool: {
+      create: (input) => requireLoaded().tool.create(input),
+    },
+    createSdkMcpServer: (input) => requireLoaded().createSdkMcpServer(input),
+    listSessions: (input) => requireLoaded().listSessions(input),
+    getSessionMessages: (input) => requireLoaded().getSessionMessages(input),
+    getSessionInfo: (input) => requireLoaded().getSessionInfo(input),
+    renameSession: (input) => requireLoaded().renameSession(input),
+    tagSession: (input) => requireLoaded().tagSession(input),
+  };
 }
